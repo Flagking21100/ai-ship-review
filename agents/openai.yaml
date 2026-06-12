@@ -1,0 +1,4 @@
+interface:
+  display_name: "AI Ship Review"
+  short_description: "Review whether an AI-built app is ready to ship."
+  default_prompt: "Review this repository for launch readiness and produce blockers, risks, and a ship checklist."

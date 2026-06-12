@@ -1,0 +1,10 @@
+[project]
+name = "ai-ship-review"
+version = "0.1.0"
+description = "A Codex skill for reviewing whether AI-built apps are ready to ship."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
