@@ -68,6 +68,32 @@ Decision: Do not ship yet.
 - Document rollback.
 ```
 
+## Real case study
+
+I tested AI Ship Review on [`nhost/nextjs-stripe-starter`](https://github.com/nhost/nextjs-stripe-starter), a public Next.js + Nhost + Stripe SaaS starter.
+
+The project looks complete at first glance: it has auth, Stripe Checkout, Stripe webhooks, Nhost metadata, migrations, and deployment notes. AI Ship Review still found several launch-readiness risks that are easy to miss in a normal code skim.
+
+```text
+Ship Readiness: Not ready
+Score: 54 / 100
+Decision: Do not ship yet.
+```
+
+Key findings:
+
+- `P0` Stripe customer access control was not implemented. The Stripe GraphQL function contained a TODO to ensure users can only access their own Stripe customer, but the authorization check returned `true`.
+- `P1` The checkout function logged request body, query, and headers, which can leak tokens or sensitive payment/session data into production logs.
+- `P1` The payment function used broad CORS with `Access-Control-Allow-Origin: *`.
+- `P1` Demo/production URLs were hardcoded in checkout and frontend pricing flows.
+- `P2` The repository had no tests or CI signals.
+
+Positive finding:
+
+- Stripe webhook signature verification was implemented with `stripe.webhooks.constructEvent(...)`.
+
+This is the kind of gap AI Ship Review is designed to catch: not "does the demo run locally?", but "what would make this risky to put in front of real users?"
+
 ## Scanner
 
 The included scanner is intentionally lightweight. It inventories useful signals; it does not replace manual review.
@@ -86,6 +112,8 @@ It checks for:
 - Test files
 - Package scripts
 - Secret-like patterns that need manual inspection
+- Risky code signals such as auth TODOs, unconditional allows, broad CORS, sensitive request logging, hardcoded service URLs, OpenAI SDK usage, and client-controlled AI resource IDs
+- Weak default secrets/passwords in env template files
 
 ## Best use cases
 

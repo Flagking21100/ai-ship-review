@@ -28,6 +28,7 @@ IGNORED_DIRS = {
     "venv",
     "__pycache__",
     ".pytest_cache",
+    "__generated__",
 }
 
 SECRET_PATTERNS = [
@@ -42,9 +43,66 @@ SECRET_PATTERNS = [
 ENV_READ_PATTERNS = [
     re.compile(r"process\.env\.([A-Z0-9_]+)"),
     re.compile(r"os\.environ(?:\.get)?\(['\"]([A-Z0-9_]+)['\"]\)"),
+    re.compile(r"os\.getenv\(['\"]([A-Z0-9_]+)['\"]"),
     re.compile(r"import\.meta\.env\.([A-Z0-9_]+)"),
     re.compile(r"Deno\.env\.get\(['\"]([A-Z0-9_]+)['\"]\)"),
 ]
+
+CODE_EXTENSIONS = {
+    ".js",
+    ".jsx",
+    ".ts",
+    ".tsx",
+    ".mjs",
+    ".cjs",
+    ".py",
+    ".go",
+    ".rs",
+    ".rb",
+    ".php",
+}
+
+RISKY_CODE_PATTERNS = [
+    (
+        "auth-placeholder",
+        re.compile(r"(?i)(todo|fixme).{0,80}(auth|authori[sz]ation|permission|access|own customer)"),
+        "Authorization-related TODO/FIXME needs manual review.",
+    ),
+    (
+        "unconditional-allow",
+        re.compile(r"\breturn\s+true\s*;?"),
+        "Unconditional allow pattern; inspect if this is inside an auth/permission check.",
+    ),
+    (
+        "request-sensitive-logging",
+        re.compile(r"console\.log\(\s*(req\.(headers|body|query)|.*authorization|.*cookie)", re.IGNORECASE),
+        "Request headers/body/query logging can expose tokens or sensitive data.",
+    ),
+    (
+        "wide-cors",
+        re.compile(r"Access-Control-Allow-Origin['\"]?\s*,\s*['\"]\*['\"]"),
+        "Wildcard CORS found in server code.",
+    ),
+    (
+        "hardcoded-url",
+        re.compile(r"https://[A-Za-z0-9.-]+\.[A-Za-z]{2,}[^\s'\"`)]*"),
+        "Hardcoded external URL found outside docs/config.",
+    ),
+    (
+        "openai-sdk-usage",
+        re.compile(r"\b(import\s+OpenAI\s+from\s+['\"]openai['\"]|from\s+['\"]openai['\"]|new\s+OpenAI\s*\()"),
+        "OpenAI SDK usage found; verify API key handling, auth, rate limits, logging, and tenant boundaries.",
+    ),
+    (
+        "client-controlled-ai-id",
+        re.compile(r"((assistantId|model|threadId)\s*:\s*(newMessage|req\.body|body|requestBody|params|data)\.|assistant_id\s*:\s*(newMessage|req\.body|body|requestBody|params|data)\.)"),
+        "Client-controlled AI identifier found; verify users cannot access or run unintended AI resources.",
+    ),
+]
+
+WEAK_ENV_VALUE_PATTERN = re.compile(
+    r"(?i)^(?:[A-Z0-9_]*(?:SECRET|PASSWORD|TOKEN|KEY)[A-Z0-9_]*)=(secret|changeme|password|supersecretpassword|123|test|admin)$"
+)
 
 
 def iter_files(root: Path):
@@ -79,11 +137,13 @@ def exists_any(root: Path, names: list[str]) -> list[str]:
 def collect_env_usage(root: Path) -> list[str]:
     names = set()
     for path in iter_files(root):
-        if path.suffix.lower() not in {".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".py", ".go", ".rs", ".rb", ".php"}:
+        if path.suffix.lower() not in CODE_EXTENSIONS:
             continue
         text = read_text(path)
         for pattern in ENV_READ_PATTERNS:
             names.update(match.group(1) for match in pattern.finditer(text))
+        if re.search(r"\b(import\s+OpenAI\s+from\s+['\"]openai['\"]|new\s+OpenAI\s*\()", text):
+            names.add("OPENAI_API_KEY")
     return sorted(names)
 
 
@@ -97,6 +157,72 @@ def find_secret_signals(root: Path) -> list[dict[str, str]]:
             if any(pattern.search(line) for pattern in SECRET_PATTERNS):
                 hits.append({"file": rel(path, root), "line": str(line_no), "signal": line.strip()[:160]})
                 break
+    return hits[:50]
+
+
+def is_code_file(path: Path) -> bool:
+    return path.suffix.lower() in CODE_EXTENSIONS
+
+
+def is_doc_or_config(path: Path) -> bool:
+    return path.suffix.lower() in {".md", ".txt", ".yaml", ".yml", ".json", ".toml"}
+
+
+def find_risky_code_signals(root: Path) -> list[dict[str, str]]:
+    hits = []
+    for path in iter_files(root):
+        if not is_code_file(path):
+            continue
+        text = read_text(path)
+        for line_no, line in enumerate(text.splitlines(), start=1):
+            stripped_line = line.strip()
+            for kind, pattern, message in RISKY_CODE_PATTERNS:
+                if kind == "hardcoded-url" and is_doc_or_config(path):
+                    continue
+                if kind == "hardcoded-url" and (
+                    stripped_line.startswith(("//", "#", "*"))
+                    or "href=" in stripped_line
+                    or "src=" in stripped_line
+                ):
+                    continue
+                if pattern.search(line):
+                    hits.append(
+                        {
+                            "file": rel(path, root),
+                            "line": str(line_no),
+                            "kind": kind,
+                            "message": message,
+                            "signal": line.strip()[:180],
+                        }
+                    )
+    return hits[:100]
+
+
+def find_env_template_risks(root: Path) -> list[dict[str, str]]:
+    hits = []
+    for path in iter_files(root):
+        name = path.name.lower()
+        if not (
+            name.startswith(".env")
+            or "env-template" in name
+            or name in {"env.example", "dotenv", "dot-env-template"}
+        ):
+            continue
+        text = read_text(path)
+        for line_no, line in enumerate(text.splitlines(), start=1):
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            if WEAK_ENV_VALUE_PATTERN.search(stripped):
+                hits.append(
+                    {
+                        "file": rel(path, root),
+                        "line": str(line_no),
+                        "kind": "weak-env-placeholder",
+                        "message": "Weak default secret/password placeholder found in an env template.",
+                        "signal": stripped[:180],
+                    }
+                )
     return hits[:50]
 
 
@@ -116,7 +242,13 @@ def classify_files(root: Path) -> dict[str, list[str]]:
     lower = [(f, f.lower()) for f in files]
     return {
         "docs": sorted(f for f, l in lower if Path(l).name in {"readme.md", "deployment.md", "ship_checklist.md", "risk_register.md", "release_notes.md"}),
-        "env_files": sorted(f for f, l in lower if Path(l).name.startswith(".env")),
+        "env_files": sorted(
+            f
+            for f, l in lower
+            if Path(l).name.startswith(".env")
+            or "env-template" in Path(l).name
+            or Path(l).name in {"env.example", "dotenv", "dot-env-template"}
+        ),
         "ci": sorted(f for f, l in lower if ".github/workflows/" in l or Path(l).name in {"vercel.json", "netlify.toml", "dockerfile", "docker-compose.yml"}),
         "tests": sorted(f for f, l in lower if any(part in l for part in ["/test/", "/tests/", "__tests__"]) or re.search(r"(\.|_)(test|spec)\.", l)),
         "lockfiles": sorted(f for f, l in lower if Path(l).name in {"package-lock.json", "pnpm-lock.yaml", "yarn.lock", "uv.lock", "poetry.lock", "requirements.txt", "go.sum", "cargo.lock"}),
@@ -140,6 +272,8 @@ def main() -> int:
         "env_usage": collect_env_usage(root),
         "files": files,
         "secret_signals": find_secret_signals(root),
+        "risky_code_signals": find_risky_code_signals(root),
+        "env_template_risks": find_env_template_risks(root),
     }
 
     if args.json:
@@ -176,6 +310,26 @@ def main() -> int:
             print(f"- `{hit['file']}:{hit['line']}` contains a secret-like pattern. Inspect manually.")
     else:
         print("- No secret-like patterns found by this lightweight scan.")
+
+    print("\n## Risky code signals")
+    if result["risky_code_signals"]:
+        for hit in result["risky_code_signals"]:
+            print(
+                f"- `{hit['file']}:{hit['line']}` [{hit['kind']}] {hit['message']} "
+                f"Signal: `{hit['signal']}`"
+            )
+    else:
+        print("- No risky code signals found by this lightweight scan.")
+
+    print("\n## Environment template risks")
+    if result["env_template_risks"]:
+        for hit in result["env_template_risks"]:
+            print(
+                f"- `{hit['file']}:{hit['line']}` [{hit['kind']}] {hit['message']} "
+                f"Signal: `{hit['signal']}`"
+            )
+    else:
+        print("- No weak env template placeholders found by this lightweight scan.")
 
     print("\nNote: This inventory is not a security audit. Inspect high-risk code paths manually.")
     return 0
