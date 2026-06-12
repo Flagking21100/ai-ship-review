@@ -23,7 +23,7 @@ This skill focuses on the gap between "it runs locally" and "we can responsibly 
 
 ## Install
 
-Copy this folder into your Codex skills directory:
+Clone or copy this folder into your Codex skills directory:
 
 ```text
 ~/.codex/skills/ai-ship-review
@@ -33,6 +33,12 @@ On Windows, the usual location is:
 
 ```text
 C:\Users\<you>\.codex\skills\ai-ship-review
+```
+
+Example:
+
+```bash
+git clone https://github.com/Flagking21100/ai-ship-review ~/.codex/skills/ai-ship-review
 ```
 
 Then ask Codex:

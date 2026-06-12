@@ -26,7 +26,7 @@ It checks the gap between "it runs locally" and "I can responsibly put this in f
 
 It outputs a ship decision, a readiness score, P0/P1 risks with evidence, and the exact artifacts to create before launch.
 
-Repo: <your GitHub URL>
+Repo: https://github.com/Flagking21100/ai-ship-review
 
 ## Places to share
 
