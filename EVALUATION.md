@@ -161,3 +161,44 @@ Type: Minimal Next.js starter
 ### Observation
 
 The repository name and README imply OpenAI/GPT, but the scanned code mostly contains a basic Next.js/MongoDB setup. This is a useful boundary case: AI Ship Review must not infer AI risks from repository names alone. It should inspect code paths and say when expected AI functionality is not present.
+
+## Case 4: vercel/nextjs-subscription-payments
+
+Repository: https://github.com/vercel/nextjs-subscription-payments
+
+Local test method: partial local snapshot reconstructed from inspected public files because network-restricted shell access prevented cloning.
+
+Type: Next.js + Supabase + Stripe subscription starter
+
+### Ship Decision
+
+```text
+Ship Readiness: Ready with caution
+Score: 72 / 100
+Decision: Reasonable starter structure, but not strong enough to treat as production-ready without adding test and operational guardrails.
+```
+
+### What AI Ship Review Caught Well
+
+- Webhook signature verification is implemented in `app/api/webhooks/route.ts` via `stripe.webhooks.constructEvent(...)`.
+- The reviewed files clearly require privileged and payment-related secrets such as `SUPABASE_SERVICE_ROLE_KEY` and `STRIPE_WEBHOOK_SECRET`.
+- The starter separates middleware, admin Supabase access, and Stripe webhook handling in understandable server-side files.
+
+### Main Launch Risks
+
+- No automated tests were evident in the inspected repository paths, which is thin coverage for auth, billing, and webhook behavior.
+- No CI or deployment workflow files were evident in the inspected repository paths, so build and smoke-check confidence appears manual.
+- The starter relies on privileged Supabase admin access and payment webhooks, but the reviewed docs/files did not show rollback, incident, or operator-focused release guidance.
+
+### False Positives
+
+- `.env.local.example` contains a long demo `NEXT_PUBLIC_SUPABASE_ANON_KEY` value. This looks secret-like but is expected starter configuration, so secret scanning should remain cautious around env examples and public anon keys.
+
+### Missed Or Weak Signals
+
+- The scanner only listed empty `tests` and `ci` inventories; it did not elevate those absences into explicit launch-readiness signals.
+- The scanner still does not distinguish "public/demo config present" from "sensitive secret committed" in env examples, so manual judgment remains necessary.
+
+### Scanner Improvements Made
+
+- Added repository-level signals for `missing-tests` and `missing-ci`, so obvious launch-readiness gaps surface directly in scanner output instead of being buried in file inventories.

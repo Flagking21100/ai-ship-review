@@ -7,4 +7,6 @@ requires-python = ">=3.10"
 license = { text = "MIT" }
 
 [tool.pytest.ini_options]
+addopts = "--basetemp=./pytest-tmp"
+cache_dir = "pytest-cache"
 testpaths = ["tests"]

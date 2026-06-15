@@ -13,8 +13,11 @@ def test_scan_repo_json_output(tmp_path: Path) -> None:
         json.dumps({"scripts": {"build": "vite build", "test": "vitest"}}),
         encoding="utf-8",
     )
+    (repo / ".github" / "workflows").mkdir(parents=True)
+    (repo / ".github" / "workflows" / "ci.yml").write_text("name: ci\n", encoding="utf-8")
     (repo / ".env.example").write_text("DATABASE_URL=\n", encoding="utf-8")
     (repo / "app.ts").write_text("console.log(process.env.DATABASE_URL)\n", encoding="utf-8")
+    (repo / "app.test.ts").write_text("it('works', () => {})\n", encoding="utf-8")
 
     script = Path(__file__).resolve().parents[1] / "scripts" / "scan_repo.py"
     completed = subprocess.run(
@@ -28,6 +31,7 @@ def test_scan_repo_json_output(tmp_path: Path) -> None:
     assert data["package_scripts"]["build"] == "vite build"
     assert "DATABASE_URL" in data["env_usage"]
     assert ".env.example" in data["files"]["env_files"]
+    assert data["repo_signals"] == []
 
 
 def test_scan_repo_reports_risky_code_signals(tmp_path: Path) -> None:
@@ -118,3 +122,25 @@ def test_scan_repo_detects_openai_sdk_usage_and_implicit_env(tmp_path: Path) -> 
     kinds = {hit["kind"] for hit in data["risky_code_signals"]}
     assert "openai-sdk-usage" in kinds
     assert "client-controlled-ai-id" in kinds
+
+
+def test_scan_repo_reports_missing_tests_and_ci(tmp_path: Path) -> None:
+    repo = tmp_path / "sample"
+    repo.mkdir()
+    (repo / "package.json").write_text(
+        json.dumps({"scripts": {"build": "next build", "start": "next start"}}),
+        encoding="utf-8",
+    )
+
+    script = Path(__file__).resolve().parents[1] / "scripts" / "scan_repo.py"
+    completed = subprocess.run(
+        [sys.executable, str(script), str(repo), "--json"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    data = json.loads(completed.stdout)
+    kinds = {hit["kind"] for hit in data["repo_signals"]}
+    assert "missing-tests" in kinds
+    assert "missing-ci" in kinds

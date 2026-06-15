@@ -255,6 +255,25 @@ def classify_files(root: Path) -> dict[str, list[str]]:
     }
 
 
+def collect_repo_signals(files: dict[str, list[str]]) -> list[dict[str, str]]:
+    hits = []
+    if not files["tests"]:
+        hits.append(
+            {
+                "kind": "missing-tests",
+                "message": "No automated test files found. Critical flows need manual inspection and launch risk is higher.",
+            }
+        )
+    if not files["ci"]:
+        hits.append(
+            {
+                "kind": "missing-ci",
+                "message": "No CI or deployment workflow files found. Build, lint, and smoke checks may be manual only.",
+            }
+        )
+    return hits
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Collect launch-readiness signals for a repository.")
     parser.add_argument("repo", nargs="?", default=".", help="Path to the repository to scan")
@@ -271,6 +290,7 @@ def main() -> int:
         "package_scripts": find_package_scripts(root),
         "env_usage": collect_env_usage(root),
         "files": files,
+        "repo_signals": collect_repo_signals(files),
         "secret_signals": find_secret_signals(root),
         "risky_code_signals": find_risky_code_signals(root),
         "env_template_risks": find_env_template_risks(root),
@@ -303,6 +323,14 @@ def main() -> int:
                 print(f"- ...and {len(values) - 40} more")
         else:
             print("- None found.")
+
+    if result["repo_signals"]:
+        print("\n## Repository signals")
+        for hit in result["repo_signals"]:
+            print(f"- [{hit['kind']}] {hit['message']}")
+    else:
+        print("\n## Repository signals")
+        print("- No repository-level launch-readiness signals found by this lightweight scan.")
 
     print("\n## Secret-like signals")
     if result["secret_signals"]:
