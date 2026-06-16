@@ -69,6 +69,40 @@ def test_scan_repo_reports_risky_code_signals(tmp_path: Path) -> None:
     assert "hardcoded-url" in kinds
 
 
+def test_scan_repo_detects_signed_download_without_auth_and_avoids_helper_return_true_noise(tmp_path: Path) -> None:
+    repo = tmp_path / "sample"
+    repo.mkdir()
+    (repo / "fileOps.ts").write_text(
+        "\n".join(
+            [
+                "export const getDownloadFileSignedURL = async (rawArgs) => {",
+                "  const { s3Key } = ensureArgsSchemaOrThrowHttpError(schema, rawArgs);",
+                "  return await getDownloadFileSignedURLFromS3({ s3Key });",
+                "};",
+                "",
+                "export const checkFileExistsInS3 = async ({ s3Key }) => {",
+                "  await s3Client.send(new HeadObjectCommand({ Key: s3Key }));",
+                "  return true;",
+                "};",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    script = Path(__file__).resolve().parents[1] / "scripts" / "scan_repo.py"
+    completed = subprocess.run(
+        [sys.executable, str(script), str(repo), "--json"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    data = json.loads(completed.stdout)
+    kinds = [hit["kind"] for hit in data["risky_code_signals"]]
+    assert "signed-download-no-auth" in kinds
+    assert "unconditional-allow" not in kinds
+
+
 def test_scan_repo_detects_python_env_and_weak_env_templates(tmp_path: Path) -> None:
     repo = tmp_path / "sample"
     repo.mkdir()

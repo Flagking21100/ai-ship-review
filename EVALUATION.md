@@ -202,3 +202,46 @@ Decision: Reasonable starter structure, but not strong enough to treat as produc
 ### Scanner Improvements Made
 
 - Added repository-level signals for `missing-tests` and `missing-ci`, so obvious launch-readiness gaps surface directly in scanner output instead of being buried in file inventories.
+
+## Case 5: wasp-lang/open-saas
+
+Repository: https://github.com/wasp-lang/open-saas
+
+Local test method: partial local snapshot reconstructed from inspected public files because network-restricted shell access prevented cloning.
+
+Type: Wasp SaaS template with auth, payments, AI demo, S3 uploads, and deployment tooling
+
+### Ship Decision
+
+```text
+Ship Readiness: Ready with caution
+Score: 69 / 100
+Decision: Strong starter breadth, but not safe to ship unchanged because the file download path appears to miss server-side authorization.
+```
+
+### What AI Ship Review Caught Well
+
+- The template clearly documents privileged production configuration in `.env.server.example`, including payment, OpenAI, analytics, and S3 variables.
+- Auth checks are present in the reviewed payment and upload-creation operations such as `generateCheckoutSession`, `getCustomerPortalUrl`, `createFileUploadUrl`, `addFileToDb`, `getAllFilesByUser`, and `deleteFile`.
+- The AI demo operation charges credits for non-subscribed users and requires `context.user`, so the reviewed path is not an obvious anonymous cost-exposure bug.
+
+### Main Launch Risks
+
+- `template/app/src/file-upload/operations.ts` exports `getDownloadFileSignedURL` as a query that accepts raw `s3Key` input and returns a signed S3 download URL without checking `context.user` or file ownership.
+- `template/app/main.wasp` wires `getDownloadFileSignedURL` as a query, so this looks externally callable rather than a private helper.
+- The reviewed snapshot did not include the underlying payment processor webhook implementation, so webhook-signature handling could not be verified from the inspected files alone.
+
+### False Positives
+
+- The previous scanner heuristic flagged helper-level `return true` patterns in storage code such as `checkFileExistsInS3`. In this case that was noise, not an auth bypass.
+
+### Missed Or Weak Signals
+
+- Initial scanner output did not flag signed download URL operations that lack evident auth or ownership checks.
+- Initial scanner output surfaced a noisy `unconditional-allow` hit from a non-auth helper, which diluted review attention in upload-heavy code.
+- Because the evaluation used a partial snapshot, scanner output about missing CI/tests was not treated as evidence about the real repository.
+
+### Scanner Improvements Made
+
+- Added a `signed-download-no-auth` risky-code signal for request-facing download/presign operations that generate object-storage access without evident auth or ownership checks.
+- Reduced `unconditional-allow` noise by requiring nearby auth/permission context before flagging `return true`.

@@ -100,6 +100,15 @@ RISKY_CODE_PATTERNS = [
     ),
 ]
 
+AUTH_CONTEXT_PATTERN = re.compile(
+    r"(?i)(auth|authori[sz]ation|permission|access|customer|owner|tenant|isAllowed|can[A-Z])"
+)
+
+SIGNED_DOWNLOAD_OPERATION_PATTERN = re.compile(
+    r"export\s+const\s+(?P<name>\w*(?:Download|SignedURL|Presign)\w*)\s*=\s*async\s*\((?P<params>[^)]*)\)\s*=>\s*{(?P<body>.*?)};",
+    re.DOTALL,
+)
+
 WEAK_ENV_VALUE_PATTERN = re.compile(
     r"(?i)^(?:[A-Z0-9_]*(?:SECRET|PASSWORD|TOKEN|KEY)[A-Z0-9_]*)=(secret|changeme|password|supersecretpassword|123|test|admin)$"
 )
@@ -174,7 +183,8 @@ def find_risky_code_signals(root: Path) -> list[dict[str, str]]:
         if not is_code_file(path):
             continue
         text = read_text(path)
-        for line_no, line in enumerate(text.splitlines(), start=1):
+        lines = text.splitlines()
+        for line_no, line in enumerate(lines, start=1):
             stripped_line = line.strip()
             for kind, pattern, message in RISKY_CODE_PATTERNS:
                 if kind == "hardcoded-url" and is_doc_or_config(path):
@@ -185,6 +195,12 @@ def find_risky_code_signals(root: Path) -> list[dict[str, str]]:
                     or "src=" in stripped_line
                 ):
                     continue
+                if kind == "unconditional-allow":
+                    context_start = max(0, line_no - 3)
+                    context_end = min(len(lines), line_no + 2)
+                    context = "\n".join(lines[context_start:context_end])
+                    if not AUTH_CONTEXT_PATTERN.search(context):
+                        continue
                 if pattern.search(line):
                     hits.append(
                         {
@@ -195,7 +211,40 @@ def find_risky_code_signals(root: Path) -> list[dict[str, str]]:
                             "signal": line.strip()[:180],
                         }
                     )
+        hits.extend(find_signed_download_auth_signals(path, root, text))
     return hits[:100]
+
+
+def find_signed_download_auth_signals(path: Path, root: Path, text: str) -> list[dict[str, str]]:
+    hits = []
+    for match in SIGNED_DOWNLOAD_OPERATION_PATTERN.finditer(text):
+        name = match.group("name")
+        params = match.group("params")
+        body = match.group("body")
+        if not re.search(r"(?i)(download|signedurl|presign)", name):
+            continue
+        if not re.search(r"(?i)\b(rawArgs|args|context|request|req)\b", f"{params}\n{body[:200]}"):
+            continue
+        if not (
+            "getSignedUrl(" in body
+            or "SignedURLFromS3" in body
+            or "GetObjectCommand" in body
+            or "s3Key" in body
+        ):
+            continue
+        if "context.user" in body or re.search(r"(?i)(owner|tenant|userId|where:\s*{\s*user)", body):
+            continue
+        line_no = text[: match.start()].count("\n") + 1
+        hits.append(
+            {
+                "file": rel(path, root),
+                "line": str(line_no),
+                "kind": "signed-download-no-auth",
+                "message": "Signed download URL operation lacks evident auth or ownership checks.",
+                "signal": name,
+            }
+        )
+    return hits
 
 
 def find_env_template_risks(root: Path) -> list[dict[str, str]]:
