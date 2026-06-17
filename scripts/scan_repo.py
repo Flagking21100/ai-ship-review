@@ -109,6 +109,22 @@ SIGNED_DOWNLOAD_OPERATION_PATTERN = re.compile(
     re.DOTALL,
 )
 
+PUBLIC_UPLOAD_ACCESS_PATTERN = re.compile(
+    r"(?i)(access\s*:\s*['\"]public['\"]|acl\s*:\s*['\"]public-read['\"])"
+)
+
+UPLOAD_REQUEST_CONTEXT_PATTERN = re.compile(
+    r"(?i)(request\.formData\(|formData\.get\(['\"]file['\"]\)|instanceof\s+Blob|multipart/form-data|req\.(file|files)|FileSchema)"
+)
+
+UPLOAD_STORAGE_CALL_PATTERN = re.compile(
+    r"\b(put|upload|uploadBytes|uploadData)\s*\("
+)
+
+HTTP_HANDLER_CONTEXT_PATTERN = re.compile(
+    r"(?i)(export\s+async\s+function\s+(POST|PUT)|new\s+NextResponse|Request\b|NextRequest\b)"
+)
+
 WEAK_ENV_VALUE_PATTERN = re.compile(
     r"(?i)^(?:[A-Z0-9_]*(?:SECRET|PASSWORD|TOKEN|KEY)[A-Z0-9_]*)=(secret|changeme|password|supersecretpassword|123|test|admin)$"
 )
@@ -212,6 +228,7 @@ def find_risky_code_signals(root: Path) -> list[dict[str, str]]:
                         }
                     )
         hits.extend(find_signed_download_auth_signals(path, root, text))
+        hits.extend(find_public_upload_access_signals(path, root, text))
     return hits[:100]
 
 
@@ -245,6 +262,32 @@ def find_signed_download_auth_signals(path: Path, root: Path, text: str) -> list
             }
         )
     return hits
+
+
+def find_public_upload_access_signals(path: Path, root: Path, text: str) -> list[dict[str, str]]:
+    if not PUBLIC_UPLOAD_ACCESS_PATTERN.search(text):
+        return []
+    if not UPLOAD_REQUEST_CONTEXT_PATTERN.search(text):
+        return []
+    if not UPLOAD_STORAGE_CALL_PATTERN.search(text):
+        return []
+    if not (
+        HTTP_HANDLER_CONTEXT_PATTERN.search(text)
+        or "/api/" in rel(path, root)
+    ):
+        return []
+
+    access_match = PUBLIC_UPLOAD_ACCESS_PATTERN.search(text)
+    line_no = text[: access_match.start()].count("\n") + 1
+    return [
+        {
+            "file": rel(path, root),
+            "line": str(line_no),
+            "kind": "public-upload-access",
+            "message": "Upload route stores files with public access; verify this is intentional, non-sensitive, and uses unguessable object names.",
+            "signal": access_match.group(0),
+        }
+    ]
 
 
 def find_env_template_risks(root: Path) -> list[dict[str, str]]:

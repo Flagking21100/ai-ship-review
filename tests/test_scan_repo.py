@@ -103,6 +103,36 @@ def test_scan_repo_detects_signed_download_without_auth_and_avoids_helper_return
     assert "unconditional-allow" not in kinds
 
 
+def test_scan_repo_detects_public_upload_access(tmp_path: Path) -> None:
+    repo = tmp_path / "sample"
+    repo.mkdir()
+    (repo / "route.ts").write_text(
+        "\n".join(
+            [
+                "import { put } from '@vercel/blob';",
+                "export async function POST(request: Request) {",
+                "  const formData = await request.formData();",
+                "  const file = formData.get('file') as Blob;",
+                "  return await put('avatar.png', file, { access: 'public' });",
+                "}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    script = Path(__file__).resolve().parents[1] / "scripts" / "scan_repo.py"
+    completed = subprocess.run(
+        [sys.executable, str(script), str(repo), "--json"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    data = json.loads(completed.stdout)
+    kinds = {hit["kind"] for hit in data["risky_code_signals"]}
+    assert "public-upload-access" in kinds
+
+
 def test_scan_repo_detects_python_env_and_weak_env_templates(tmp_path: Path) -> None:
     repo = tmp_path / "sample"
     repo.mkdir()

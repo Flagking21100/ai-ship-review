@@ -245,3 +245,44 @@ Decision: Strong starter breadth, but not safe to ship unchanged because the fil
 
 - Added a `signed-download-no-auth` risky-code signal for request-facing download/presign operations that generate object-storage access without evident auth or ownership checks.
 - Reduced `unconditional-allow` noise by requiring nearby auth/permission context before flagging `return true`.
+
+## Case 6: vercel/ai-chatbot
+
+Repository: https://github.com/vercel/ai-chatbot
+
+Local test method: partial local snapshot reconstructed from inspected public files because network-restricted shell access prevented cloning.
+
+Type: Next.js AI chatbot starter with auth, Postgres persistence, Redis rate limits, and Vercel Blob uploads
+
+### Ship Decision
+
+```text
+Ship Readiness: Ready with caution
+Score: 76 / 100
+Decision: Reasonable AI starter structure, but review upload privacy defaults and signup abuse controls before production launch.
+```
+
+### What AI Ship Review Caught Well
+
+- The reviewed chat API route requires `session.user`, checks ownership on existing chats, and applies IP plus per-user rate limits before continuing AI work.
+- The reviewed auth and DB files clearly require production secrets such as `AUTH_SECRET`, `AI_GATEWAY_API_KEY`, `BLOB_READ_WRITE_TOKEN`, `POSTGRES_URL`, and `REDIS_URL`.
+- The package scripts and inspected routes suggest the starter expects migrations and Playwright coverage rather than being a zero-ops demo.
+
+### Main Launch Risks
+
+- `app/(chat)/api/files/upload/route.ts` uploads user-supplied files with `access: "public"`, which makes attachment privacy a product decision rather than a safe default. If this starter is adapted for sensitive uploads or private workspaces, public blob URLs are a real disclosure risk.
+- The same upload route preserves a sanitized version of the original filename in the blob key. Even if the storage backend adds randomness, teams should confirm object names remain unguessable and avoid leaking user-provided names unnecessarily.
+- `app/(auth)/actions.ts` allows direct credential registration with only a six-character password minimum in the reviewed path; email verification, signup throttling, and anti-abuse controls were not evident from the inspected files.
+
+### False Positives
+
+- The reconstructed local snapshot necessarily lacked the full repository test tree and workflow files, so `missing-tests` and `missing-ci` scanner signals were not treated as evidence about the real repository.
+
+### Missed Or Weak Signals
+
+- Initial scanner output did not flag request-handled upload routes that explicitly store files with public object/blob access.
+- The scanner still does not reason about auth-abuse controls such as signup throttling, email verification, or disposable guest-account cleanup; that remains manual review territory.
+
+### Scanner Improvements Made
+
+- Added a `public-upload-access` risky-code signal for upload handlers that combine request/file handling with explicit public object storage settings such as `access: "public"` or `ACL: "public-read"`.
