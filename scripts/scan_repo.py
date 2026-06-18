@@ -129,6 +129,10 @@ WEAK_ENV_VALUE_PATTERN = re.compile(
     r"(?i)^(?:[A-Z0-9_]*(?:SECRET|PASSWORD|TOKEN|KEY)[A-Z0-9_]*)=(secret|changeme|password|supersecretpassword|123|test|admin)$"
 )
 
+WEAK_PASSWORD_LITERAL_PATTERN = re.compile(
+    r"(?i)^(admin123|password|secret|changeme|test123|demo123|supersecretpassword|123456)$"
+)
+
 
 def iter_files(root: Path):
     for dirpath, dirnames, filenames in os.walk(root):
@@ -228,6 +232,7 @@ def find_risky_code_signals(root: Path) -> list[dict[str, str]]:
                         }
                     )
         hits.extend(find_signed_download_auth_signals(path, root, text))
+        hits.extend(find_seed_credential_signals(path, root, text))
         hits.extend(find_public_upload_access_signals(path, root, text))
     return hits[:100]
 
@@ -286,6 +291,32 @@ def find_public_upload_access_signals(path: Path, root: Path, text: str) -> list
             "kind": "public-upload-access",
             "message": "Upload route stores files with public access; verify this is intentional, non-sensitive, and uses unguessable object names.",
             "signal": access_match.group(0),
+        }
+    ]
+
+
+def find_seed_credential_signals(path: Path, root: Path, text: str) -> list[dict[str, str]]:
+    relative_path = rel(path, root).lower()
+    if not re.search(r"(?i)(seed|fixture|bootstrap|setup)", relative_path):
+        return []
+
+    email_match = re.search(r"(?i)\bemail\b[^=\n:]*[:=]\s*['\"]([^'\"]+@[^'\"]+)['\"]", text)
+    password_match = re.search(r"(?i)\bpassword\b[^=\n:]*[:=]\s*['\"]([^'\"]+)['\"]", text)
+    if not email_match or not password_match:
+        return []
+    if not WEAK_PASSWORD_LITERAL_PATTERN.search(password_match.group(1)):
+        return []
+    if not re.search(r"(?i)role\s*[:=]\s*['\"](owner|admin)['\"]", text):
+        return []
+
+    line_no = text[: password_match.start()].count("\n") + 1
+    return [
+        {
+            "file": rel(path, root),
+            "line": str(line_no),
+            "kind": "seed-default-credentials",
+            "message": "Seed/setup code contains hardcoded default credentials for an owner/admin account.",
+            "signal": f"{email_match.group(1)} / {password_match.group(1)}",
         }
     ]
 

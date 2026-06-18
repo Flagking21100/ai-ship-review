@@ -133,6 +133,45 @@ def test_scan_repo_detects_public_upload_access(tmp_path: Path) -> None:
     assert "public-upload-access" in kinds
 
 
+def test_scan_repo_detects_seed_default_credentials(tmp_path: Path) -> None:
+    repo = tmp_path / "sample"
+    repo.mkdir()
+    (repo / "seed.ts").write_text(
+        "\n".join(
+            [
+                "const email = 'test@test.com';",
+                "const password = 'admin123';",
+                "await db.insert(users).values({ email, passwordHash, role: 'owner' });",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (repo / "safe_seed.ts").write_text(
+        "\n".join(
+            [
+                "const email = process.env.SEED_EMAIL;",
+                "const password = process.env.SEED_PASSWORD;",
+                "await db.insert(users).values({ email, passwordHash, role: 'owner' });",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    script = Path(__file__).resolve().parents[1] / "scripts" / "scan_repo.py"
+    completed = subprocess.run(
+        [sys.executable, str(script), str(repo), "--json"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    data = json.loads(completed.stdout)
+    flagged = [hit for hit in data["risky_code_signals"] if hit["kind"] == "seed-default-credentials"]
+    assert len(flagged) == 1
+    assert flagged[0]["file"] == "seed.ts"
+    assert flagged[0]["signal"] == "test@test.com / admin123"
+
+
 def test_scan_repo_detects_python_env_and_weak_env_templates(tmp_path: Path) -> None:
     repo = tmp_path / "sample"
     repo.mkdir()

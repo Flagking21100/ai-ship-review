@@ -286,3 +286,44 @@ Decision: Reasonable AI starter structure, but review upload privacy defaults an
 ### Scanner Improvements Made
 
 - Added a `public-upload-access` risky-code signal for upload handlers that combine request/file handling with explicit public object storage settings such as `access: "public"` or `ACL: "public-read"`.
+
+## Case 7: nextjs/saas-starter
+
+Repository: https://github.com/nextjs/saas-starter
+
+Local test method: partial local snapshot reconstructed from inspected public files because network-restricted shell access prevented cloning.
+
+Type: Next.js SaaS starter with Stripe billing, Postgres, seeded owner account, and deployment-oriented scripts
+
+### Ship Decision
+
+```text
+Ship Readiness: Ready with caution
+Score: 73 / 100
+Decision: Sensible starter baseline, but do not carry the seeded owner credentials or assume production verification depth from the starter alone.
+```
+
+### What AI Ship Review Caught Well
+
+- The reviewed webhook route verifies Stripe signatures with `stripe.webhooks.constructEvent(...)`, so the billing webhook path is not obviously accepting forged events.
+- The inspected env example documents production-sensitive settings such as `POSTGRES_URL`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `BASE_URL`, and `AUTH_SECRET`.
+- Package scripts include explicit database setup and migration commands, which is better operational scaffolding than many lightweight starters provide.
+
+### Main Launch Risks
+
+- `lib/db/seed.ts` hardcodes a seeded owner account with `test@test.com` and password `admin123`. That is acceptable for local bootstrap only if teams guarantee the seed path never runs in shared or production environments and the account is removed immediately.
+- No automated tests or CI/workflow files were evident in the inspected snapshot, so release confidence for auth, billing, and migrations still appears thin.
+- The reviewed public files did not show rollback, incident, or production smoke-test guidance beyond basic setup commands, so operational readiness remains only partially evidenced.
+
+### False Positives
+
+- None from this case after the scanner change. The new seeded-credential rule stayed scoped to setup/seed-style files and did not trigger on env examples or ordinary source files.
+
+### Missed Or Weak Signals
+
+- Initial scanner output did not flag hardcoded default credentials embedded in seed/setup code, even when the seeded account was created with an elevated `owner` role.
+- Because the evaluation used a partial snapshot, missing tests/CI signals were treated as review prompts rather than definitive claims about the full upstream repository.
+
+### Scanner Improvements Made
+
+- Added a `seed-default-credentials` risky-code signal for setup/seed files that combine a hardcoded email, a weak literal password, and an owner/admin role assignment.
