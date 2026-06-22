@@ -133,6 +133,14 @@ WEAK_PASSWORD_LITERAL_PATTERN = re.compile(
     r"(?i)^(admin123|password|secret|changeme|test123|demo123|supersecretpassword|123456)$"
 )
 
+AUTH_CALLBACK_PATH_PATTERN = re.compile(r"(?i)(auth|oauth).*(callback|return)|(?:callback|return).*(auth|oauth)")
+
+REQUEST_ORIGIN_REDIRECT_PATTERN = re.compile(
+    r"(?i)(new\s+URL\s*\(\s*request\.url\s*\)|request\.nextUrl\.origin|requestUrl\.origin)"
+)
+
+REDIRECT_CALL_PATTERN = re.compile(r"(?i)(redirect\s*\(|NextResponse\.redirect\s*\()")
+
 
 def iter_files(root: Path):
     for dirpath, dirnames, filenames in os.walk(root):
@@ -234,6 +242,7 @@ def find_risky_code_signals(root: Path) -> list[dict[str, str]]:
         hits.extend(find_signed_download_auth_signals(path, root, text))
         hits.extend(find_seed_credential_signals(path, root, text))
         hits.extend(find_public_upload_access_signals(path, root, text))
+        hits.extend(find_auth_callback_origin_redirect_signals(path, root, text))
     return hits[:100]
 
 
@@ -317,6 +326,31 @@ def find_seed_credential_signals(path: Path, root: Path, text: str) -> list[dict
             "kind": "seed-default-credentials",
             "message": "Seed/setup code contains hardcoded default credentials for an owner/admin account.",
             "signal": f"{email_match.group(1)} / {password_match.group(1)}",
+        }
+    ]
+
+
+def find_auth_callback_origin_redirect_signals(path: Path, root: Path, text: str) -> list[dict[str, str]]:
+    relative_path = rel(path, root)
+    normalized_path = relative_path.lower()
+    if not AUTH_CALLBACK_PATH_PATTERN.search(normalized_path):
+        return []
+    if not REQUEST_ORIGIN_REDIRECT_PATTERN.search(text):
+        return []
+    if not REDIRECT_CALL_PATTERN.search(text):
+        return []
+    if not re.search(r"(?i)\$\{\s*(requestUrl|request\.nextUrl)\.origin\s*\}|request\.nextUrl\.origin\s*\+", text):
+        return []
+
+    origin_match = REQUEST_ORIGIN_REDIRECT_PATTERN.search(text)
+    line_no = text[: origin_match.start()].count("\n") + 1
+    return [
+        {
+            "file": relative_path,
+            "line": str(line_no),
+            "kind": "auth-callback-request-origin",
+            "message": "Auth callback redirect derives its base URL from the incoming request origin; verify trusted host handling or prefer a configured site URL.",
+            "signal": origin_match.group(0),
         }
     ]
 

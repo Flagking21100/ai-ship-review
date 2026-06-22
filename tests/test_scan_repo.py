@@ -133,6 +133,49 @@ def test_scan_repo_detects_public_upload_access(tmp_path: Path) -> None:
     assert "public-upload-access" in kinds
 
 
+def test_scan_repo_detects_auth_callback_request_origin_redirect_and_ignores_general_site_url_helpers(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "sample"
+    (repo / "app" / "auth" / "callback").mkdir(parents=True)
+    (repo / "utils").mkdir()
+    (repo / "app" / "auth" / "callback" / "route.ts").write_text(
+        "\n".join(
+            [
+                "import { NextRequest, NextResponse } from 'next/server';",
+                "export async function GET(request: NextRequest) {",
+                "  const requestUrl = new URL(request.url);",
+                "  return NextResponse.redirect(`${requestUrl.origin}/account`);",
+                "}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (repo / "utils" / "helpers.ts").write_text(
+        "\n".join(
+            [
+                "export const getURL = () => {",
+                "  return process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';",
+                "};",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    script = Path(__file__).resolve().parents[1] / "scripts" / "scan_repo.py"
+    completed = subprocess.run(
+        [sys.executable, str(script), str(repo), "--json"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    data = json.loads(completed.stdout)
+    flagged = [hit for hit in data["risky_code_signals"] if hit["kind"] == "auth-callback-request-origin"]
+    assert len(flagged) == 1
+    assert flagged[0]["file"] == "app/auth/callback/route.ts"
+
+
 def test_scan_repo_detects_seed_default_credentials(tmp_path: Path) -> None:
     repo = tmp_path / "sample"
     repo.mkdir()

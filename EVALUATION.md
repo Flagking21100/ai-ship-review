@@ -327,3 +327,44 @@ Decision: Sensible starter baseline, but do not carry the seeded owner credentia
 ### Scanner Improvements Made
 
 - Added a `seed-default-credentials` risky-code signal for setup/seed files that combine a hardcoded email, a weak literal password, and an owner/admin role assignment.
+
+## Case 8: vercel/nextjs-subscription-payments
+
+Repository: https://github.com/vercel/nextjs-subscription-payments
+
+Local test method: partial local snapshot reconstructed from inspected public files because network-restricted shell access prevented cloning.
+
+Type: Next.js subscription starter with Supabase auth, Stripe webhooks, and deployment-oriented helpers
+
+### Ship Decision
+
+```text
+Ship Readiness: Ready with caution
+Score: 74 / 100
+Decision: Good billing/auth starter coverage, but review callback redirect host trust before treating it as production-safe in non-Vercel or proxy-heavy deployments.
+```
+
+### What AI Ship Review Caught Well
+
+- The reviewed webhook route verifies Stripe events with `stripe.webhooks.constructEvent(...)`, so the payment webhook path is not obviously accepting forged requests.
+- The inspected helper code already has a configured-site-URL helper (`getURL`) and the env example documents third-party auth settings, which is better operational guidance than many starters provide.
+- Package scripts show explicit local Stripe forwarding and Supabase startup commands, which helps deployment/setup review.
+
+### Main Launch Risks
+
+- `app/auth/callback/route.ts` builds signin/account redirects from `new URL(request.url).origin`. In starter code reused behind custom proxies or untrusted host-header setups, that can create host-trust or open-redirect style risk unless the deployment strictly normalizes the incoming origin.
+- The same callback route does not appear to reuse the configured site URL helper, so redirect safety depends on infrastructure behavior rather than application-level configuration.
+- The reconstructed snapshot did not include the full test tree or workflow files, so CI/test coverage could not be verified from this local case alone.
+
+### False Positives
+
+- The new callback-origin rule stayed quiet on the general `utils/helpers.ts` site URL helper because it only fires inside auth/callback-style routes that also perform redirects.
+
+### Missed Or Weak Signals
+
+- Initial scanner output did not flag auth callback redirects whose base URL is derived from the incoming request origin instead of a configured canonical site URL.
+- As with prior partial snapshots, `missing-tests` and `missing-ci` remained prompts for manual follow-up rather than definitive claims about the upstream repository.
+
+### Scanner Improvements Made
+
+- Added an `auth-callback-request-origin` risky-code signal for auth callback routes that derive redirect targets from `request.url` / request origin, prompting reviewers to verify trusted-host handling or switch to a configured site URL.

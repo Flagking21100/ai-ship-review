@@ -1,0 +1,11 @@
+{
+  "private": true,
+  "scripts": {
+    "dev": "next dev --turbo",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "stripe:listen": "stripe listen --forward-to=localhost:3000/api/webhooks",
+    "supabase:start": "npx supabase start"
+  }
+}
