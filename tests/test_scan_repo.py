@@ -241,6 +241,40 @@ def test_scan_repo_detects_python_env_and_weak_env_templates(tmp_path: Path) -> 
     assert {hit["kind"] for hit in data["env_template_risks"]} == {"weak-env-placeholder"}
 
 
+def test_scan_repo_detects_insecure_compose_database_auth(tmp_path: Path) -> None:
+    repo = tmp_path / "sample"
+    repo.mkdir()
+    (repo / "docker-compose.yml").write_text(
+        "\n".join(
+            [
+                "services:",
+                "  mysql:",
+                "    image: mysql:8.0",
+                "    environment:",
+                "      MYSQL_ALLOW_EMPTY_PASSWORD: 'yes'",
+                "  postgres:",
+                "    image: postgres:16",
+                "    environment:",
+                "      POSTGRES_HOST_AUTH_METHOD: trust",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    script = Path(__file__).resolve().parents[1] / "scripts" / "scan_repo.py"
+    completed = subprocess.run(
+        [sys.executable, str(script), str(repo), "--json"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    data = json.loads(completed.stdout)
+    kinds = {hit["kind"] for hit in data["deployment_config_risks"]}
+    assert "compose-empty-db-password" in kinds
+    assert "compose-trust-db-auth" in kinds
+
+
 def test_scan_repo_detects_openai_sdk_usage_and_implicit_env(tmp_path: Path) -> None:
     repo = tmp_path / "sample"
     repo.mkdir()

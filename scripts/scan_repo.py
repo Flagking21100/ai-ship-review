@@ -141,6 +141,19 @@ REQUEST_ORIGIN_REDIRECT_PATTERN = re.compile(
 
 REDIRECT_CALL_PATTERN = re.compile(r"(?i)(redirect\s*\(|NextResponse\.redirect\s*\()")
 
+INSECURE_COMPOSE_PATTERNS = [
+    (
+        "compose-empty-db-password",
+        re.compile(r"(?i)\bMYSQL_ALLOW_EMPTY_PASSWORD\s*:\s*['\"]?(?:yes|true|1)['\"]?"),
+        "Docker Compose enables an empty MySQL password; verify this is local-only and cannot be reused for shared or production deployments.",
+    ),
+    (
+        "compose-trust-db-auth",
+        re.compile(r"(?i)\bPOSTGRES_HOST_AUTH_METHOD\s*:\s*['\"]?trust['\"]?"),
+        "Docker Compose enables PostgreSQL trust authentication; verify this is local-only and never reused for shared or production deployments.",
+    ),
+]
+
 
 def iter_files(root: Path):
     for dirpath, dirnames, filenames in os.walk(root):
@@ -383,6 +396,34 @@ def find_env_template_risks(root: Path) -> list[dict[str, str]]:
     return hits[:50]
 
 
+def is_compose_file(path: Path) -> bool:
+    name = path.name.lower()
+    return name in {"docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"}
+
+
+def find_deployment_config_risks(root: Path) -> list[dict[str, str]]:
+    hits = []
+    for path in iter_files(root):
+        if not is_compose_file(path):
+            continue
+        text = read_text(path)
+        for kind, pattern, message in INSECURE_COMPOSE_PATTERNS:
+            match = pattern.search(text)
+            if not match:
+                continue
+            line_no = text[: match.start()].count("\n") + 1
+            hits.append(
+                {
+                    "file": rel(path, root),
+                    "line": str(line_no),
+                    "kind": kind,
+                    "message": message,
+                    "signal": match.group(0),
+                }
+            )
+    return hits[:50]
+
+
 def find_package_scripts(root: Path) -> dict[str, object]:
     package_json = root / "package.json"
     if not package_json.exists():
@@ -451,6 +492,7 @@ def main() -> int:
         "secret_signals": find_secret_signals(root),
         "risky_code_signals": find_risky_code_signals(root),
         "env_template_risks": find_env_template_risks(root),
+        "deployment_config_risks": find_deployment_config_risks(root),
     }
 
     if args.json:
@@ -515,6 +557,16 @@ def main() -> int:
             )
     else:
         print("- No weak env template placeholders found by this lightweight scan.")
+
+    print("\n## Deployment config risks")
+    if result["deployment_config_risks"]:
+        for hit in result["deployment_config_risks"]:
+            print(
+                f"- `{hit['file']}:{hit['line']}` [{hit['kind']}] {hit['message']} "
+                f"Signal: `{hit['signal']}`"
+            )
+    else:
+        print("- No risky deployment-config shortcuts found by this lightweight scan.")
 
     print("\nNote: This inventory is not a security audit. Inspect high-risk code paths manually.")
     return 0

@@ -368,3 +368,45 @@ Decision: Good billing/auth starter coverage, but review callback redirect host 
 ### Scanner Improvements Made
 
 - Added an `auth-callback-request-origin` risky-code signal for auth callback routes that derive redirect targets from `request.url` / request origin, prompting reviewers to verify trusted-host handling or switch to a configured site URL.
+
+## Case 9: dubinc/dub
+
+Repository: https://github.com/dubinc/dub
+
+Local test method: partial local snapshot reconstructed from inspected public files because network-restricted shell access prevented cloning.
+
+Type: Next.js SaaS application with auth, billing, storage, middleware logging, and deployment-oriented local infrastructure
+
+### Ship Decision
+
+```text
+Ship Readiness: Ready with caution
+Score: 78 / 100
+Decision: Stronger operational baseline than most starters, but teams should not reuse the local Docker stack unchanged because it explicitly weakens database authentication for convenience.
+```
+
+### What AI Ship Review Caught Well
+
+- The inspected env example documents a broad set of production-sensitive integrations, including Stripe, Shopify, storage, Anthropic, Axiom, and support webhooks.
+- The reviewed storage helper includes explicit SSRF-style protections before fetching arbitrary image URLs, including protocol checks, DNS resolution, and private-address blocking.
+- The reconstructed snapshot included visible CI/test structure, so this case did not collapse into the common "missing tests/CI" starter pattern.
+
+### Main Launch Risks
+
+- `apps/web/docker-compose.yml` explicitly sets `MYSQL_ALLOW_EMPTY_PASSWORD: "yes"` while exposing MySQL on `3306` and the local PlanetScale proxy on `3900`. The file warns it is for local development only, but this is still a real launch-readiness risk if a team copies the stack into a shared preview or production-like environment.
+- The same compose file exposes MailHog on `8025`, which is fine for local debugging but should never appear on an internet-facing deployment.
+- `apps/web/middleware.ts` logs `transformMiddlewareRequest(req)` to Axiom. That may be perfectly acceptable, but from the inspected files alone the exact logged fields were not verifiable, so request-header/cookie/query redaction still deserves manual privacy review.
+
+### False Positives
+
+- The scanner flagged `https://wsrv.nl` in `apps/web/lib/storage.ts` as a generic `hardcoded-url`. Manual review showed this is a deliberate image-proxy dependency paired with SSRF fallback checks, not a launch blocker by itself.
+
+### Missed Or Weak Signals
+
+- Initial scanner output did not flag Docker Compose files that explicitly disable database passwords or enable trust-style local auth shortcuts.
+- The scanner still does not reason about structured request logging helpers such as `transformMiddlewareRequest(req)`; that remains manual review territory because the signal-to-noise tradeoff is unclear without helper expansion.
+- Because this evaluation used a partial snapshot, conclusions about the full upstream release process remain bounded by the inspected files rather than the whole repository.
+
+### Scanner Improvements Made
+
+- Added deployment-config signals for insecure local database auth shortcuts in compose files: `compose-empty-db-password` for MySQL and `compose-trust-db-auth` for PostgreSQL.
