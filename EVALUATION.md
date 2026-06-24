@@ -410,3 +410,44 @@ Decision: Stronger operational baseline than most starters, but teams should not
 ### Scanner Improvements Made
 
 - Added deployment-config signals for insecure local database auth shortcuts in compose files: `compose-empty-db-password` for MySQL and `compose-trust-db-auth` for PostgreSQL.
+
+## Case 10: papermark/papermark
+
+Repository: https://github.com/papermark/papermark
+
+Local test method: partial local snapshot reconstructed from inspected public files because network-restricted shell access prevented cloning.
+
+Type: Next.js document-sharing SaaS with auth, blob storage, AI, payments, queueing, and deployment-oriented secrets
+
+### Ship Decision
+
+```text
+Ship Readiness: Ready with caution
+Score: 75 / 100
+Decision: Solid SaaS surface area and some visible auth hardening, but production teams should tighten secret/bootstrap guidance and verify broader release coverage before treating the template as launch-ready.
+```
+
+### What AI Ship Review Caught Well
+
+- The reviewed auth handler in `pages/api/auth/[...nextauth].ts` applies rate limiting before allowing sign-in, which is stronger abuse-control posture than many starter kits show.
+- The inspected package scripts include explicit deploy-adjacent commands such as `prisma migrate deploy`, Stripe webhook forwarding, and Trigger.dev deployment, so the project does expose real operational surfaces rather than only local dev scripts.
+- The env example documents a broad production integration set, including blob storage, email, queue/webhook signing, auth, and document-password secrets.
+
+### Main Launch Risks
+
+- `.env.example` uses placeholder-sensitive values such as `NEXTAUTH_SECRET=my-superstrong-secret`, `HANKO_API_KEY=add-your-hanko-api-key`, and `NEXT_PRIVATE_DOCUMENT_PASSWORD_KEY=my-superstrong-document-secret`. Those are safer than real secrets, but they are still important review prompts because teams frequently ship starters with placeholder secret material left unchanged.
+- The inspected workflow evidence was thin: the reconstructed public snapshot only surfaced `.github/workflows/cla.yml`, and `package.json` did not expose a test script. That does not prove the full upstream repo lacks meaningful CI or tests, but it does mean launch confidence cannot be inferred from the inspected files alone.
+- Because this was a partial snapshot, higher-risk paths such as upload privacy, signed document access, webhook verification, and tenant isolation could not be fully verified from the reviewed files alone.
+
+### False Positives
+
+- None from this case after the scanner change. The new placeholder-secret heuristic stayed scoped to secret-like env variable names and did not flag ordinary example values such as `NEXT_PUBLIC_SITE_URL=https://example.com`.
+
+### Missed Or Weak Signals
+
+- Initial scanner output only reported `missing-tests` for the Papermark snapshot and completely missed placeholder secret values in `.env.example`.
+- The previous weak-env heuristic only caught obvious literals like `secret` or `supersecretpassword`, leaving more realistic starter placeholders such as `my-superstrong-secret` and `add-your-hanko-api-key` invisible.
+
+### Scanner Improvements Made
+
+- Expanded env-template placeholder detection so secret-like variable names are flagged when they use obvious placeholder values such as `my-...-secret`, `add-your-...-api-key`, and similar setup text, while still ignoring non-sensitive example values.

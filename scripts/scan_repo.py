@@ -129,6 +129,13 @@ WEAK_ENV_VALUE_PATTERN = re.compile(
     r"(?i)^(?:[A-Z0-9_]*(?:SECRET|PASSWORD|TOKEN|KEY)[A-Z0-9_]*)=(secret|changeme|password|supersecretpassword|123|test|admin)$"
 )
 
+SENSITIVE_ENV_NAME_PATTERN = re.compile(r"(?i)(SECRET|PASSWORD|TOKEN|KEY)")
+
+PLACEHOLDER_SENSITIVE_VALUE_PATTERN = re.compile(
+    r"(?i)^(?:add|set|replace|insert|your|my|example|sample|dummy|test|demo|placeholder)"
+    r"[-_a-z0-9]*(?:secret|password|token|key)[-_a-z0-9]*$"
+)
+
 WEAK_PASSWORD_LITERAL_PATTERN = re.compile(
     r"(?i)^(admin123|password|secret|changeme|test123|demo123|supersecretpassword|123456)$"
 )
@@ -383,7 +390,7 @@ def find_env_template_risks(root: Path) -> list[dict[str, str]]:
             stripped = line.strip()
             if not stripped or stripped.startswith("#"):
                 continue
-            if WEAK_ENV_VALUE_PATTERN.search(stripped):
+            if WEAK_ENV_VALUE_PATTERN.search(stripped) or is_placeholder_secret_template_value(stripped):
                 hits.append(
                     {
                         "file": rel(path, root),
@@ -394,6 +401,18 @@ def find_env_template_risks(root: Path) -> list[dict[str, str]]:
                     }
                 )
     return hits[:50]
+
+
+def is_placeholder_secret_template_value(line: str) -> bool:
+    if "=" not in line:
+        return False
+    name, value = line.split("=", 1)
+    if not SENSITIVE_ENV_NAME_PATTERN.search(name):
+        return False
+    normalized_value = value.strip().strip("'\"")
+    if not normalized_value:
+        return False
+    return bool(PLACEHOLDER_SENSITIVE_VALUE_PATTERN.search(normalized_value))
 
 
 def is_compose_file(path: Path) -> bool:

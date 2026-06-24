@@ -241,6 +241,36 @@ def test_scan_repo_detects_python_env_and_weak_env_templates(tmp_path: Path) -> 
     assert {hit["kind"] for hit in data["env_template_risks"]} == {"weak-env-placeholder"}
 
 
+def test_scan_repo_detects_placeholder_secret_values_in_env_templates(tmp_path: Path) -> None:
+    repo = tmp_path / "sample"
+    repo.mkdir()
+    (repo / ".env.example").write_text(
+        "\n".join(
+            [
+                "NEXTAUTH_SECRET=my-superstrong-secret",
+                "HANKO_API_KEY=add-your-hanko-api-key",
+                "NEXT_PUBLIC_SITE_URL=https://example.com",
+                "NORMAL_NAME=example-value",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    script = Path(__file__).resolve().parents[1] / "scripts" / "scan_repo.py"
+    completed = subprocess.run(
+        [sys.executable, str(script), str(repo), "--json"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    data = json.loads(completed.stdout)
+    signals = {hit["signal"] for hit in data["env_template_risks"]}
+    assert "NEXTAUTH_SECRET=my-superstrong-secret" in signals
+    assert "HANKO_API_KEY=add-your-hanko-api-key" in signals
+    assert "NEXT_PUBLIC_SITE_URL=https://example.com" not in signals
+
+
 def test_scan_repo_detects_insecure_compose_database_auth(tmp_path: Path) -> None:
     repo = tmp_path / "sample"
     repo.mkdir()
