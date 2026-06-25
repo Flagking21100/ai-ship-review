@@ -100,6 +100,10 @@ RISKY_CODE_PATTERNS = [
     ),
 ]
 
+FILE_LEVEL_RISKY_KINDS = {
+    "openai-sdk-usage",
+}
+
 AUTH_CONTEXT_PATTERN = re.compile(
     r"(?i)(auth|authori[sz]ation|permission|access|customer|owner|tenant|isAllowed|can[A-Z])"
 )
@@ -232,9 +236,12 @@ def find_risky_code_signals(root: Path) -> list[dict[str, str]]:
             continue
         text = read_text(path)
         lines = text.splitlines()
+        file_level_hits: set[str] = set()
         for line_no, line in enumerate(lines, start=1):
             stripped_line = line.strip()
             for kind, pattern, message in RISKY_CODE_PATTERNS:
+                if kind in FILE_LEVEL_RISKY_KINDS and kind in file_level_hits:
+                    continue
                 if kind == "hardcoded-url" and is_doc_or_config(path):
                     continue
                 if kind == "hardcoded-url" and (
@@ -259,6 +266,8 @@ def find_risky_code_signals(root: Path) -> list[dict[str, str]]:
                             "signal": line.strip()[:180],
                         }
                     )
+                    if kind in FILE_LEVEL_RISKY_KINDS:
+                        file_level_hits.add(kind)
         hits.extend(find_signed_download_auth_signals(path, root, text))
         hits.extend(find_seed_credential_signals(path, root, text))
         hits.extend(find_public_upload_access_signals(path, root, text))

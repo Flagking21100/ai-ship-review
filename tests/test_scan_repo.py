@@ -329,9 +329,13 @@ def test_scan_repo_detects_openai_sdk_usage_and_implicit_env(tmp_path: Path) -> 
 
     data = json.loads(completed.stdout)
     assert "OPENAI_API_KEY" in data["env_usage"]
-    kinds = {hit["kind"] for hit in data["risky_code_signals"]}
+    risky_hits = data["risky_code_signals"]
+    kinds = {hit["kind"] for hit in risky_hits}
     assert "openai-sdk-usage" in kinds
     assert "client-controlled-ai-id" in kinds
+    openai_hits = [hit for hit in risky_hits if hit["kind"] == "openai-sdk-usage"]
+    assert len(openai_hits) == 1
+    assert openai_hits[0]["line"] == "1"
 
 
 def test_scan_repo_reports_missing_tests_and_ci(tmp_path: Path) -> None:

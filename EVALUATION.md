@@ -451,3 +451,43 @@ Decision: Solid SaaS surface area and some visible auth hardening, but productio
 ### Scanner Improvements Made
 
 - Expanded env-template placeholder detection so secret-like variable names are flagged when they use obvious placeholder values such as `my-...-secret`, `add-your-...-api-key`, and similar setup text, while still ignoring non-sensitive example values.
+
+## Case 11: wasp-lang/open-saas (AI/upload follow-up)
+
+Repository: https://github.com/wasp-lang/open-saas
+
+Local test method: partial local snapshot reconstructed from inspected public files because network-restricted shell access prevented cloning.
+
+Type: AI-enabled SaaS starter with authenticated AI operations, signed S3 upload/download helpers, and starter payment wiring
+
+### Ship Decision
+
+```text
+Ship Readiness: Ready with caution
+Score: 72 / 100
+Decision: The inspected AI and file flows show reasonable starter auth checks, but the download-signing path still needs ownership enforcement and the snapshot remains too partial for a broad production-ready claim.
+```
+
+### What AI Ship Review Caught Well
+
+- `template/app/src/file-upload/operations.ts` still exposes a real `signed-download-no-auth` concern: `getDownloadFileSignedURL` signs an S3 object from raw `s3Key` input without an evident `context.user` or ownership check.
+- The same file shows stronger patterns on adjacent flows: upload URL creation, file listing, and delete operations all check `context.user`, which makes the unauthenticated download signer stand out as a real asymmetry instead of generic scanner noise.
+- `template/app/src/demo-ai-app/operations.ts` authenticates the AI operation before calling OpenAI and decrements credits inside a transaction, which is better operational discipline than many AI starter demos.
+
+### Main Launch Risks
+
+- The inspected signed-download operation remains the main launch-readiness risk in this snapshot because possession of an `s3Key` appears sufficient to mint a download URL.
+- `template/app/.env.server.example` still includes placeholder-sensitive values such as `LEMONSQUEEZY_WEBHOOK_SECRET=my-webhook-secret`, which is safe as an example but risky if downstream teams deploy without replacing it.
+- The snapshot still lacks visible CI/test evidence, so conclusions remain bounded to the inspected starter files rather than a verified full release process.
+
+### False Positives
+
+- The scanner previously emitted two `openai-sdk-usage` findings from `template/app/src/demo-ai-app/operations.ts`: one for `import OpenAI` and another for `new OpenAI(...)`. Manual review showed those lines represent one underlying review prompt, so the duplicate was noise rather than extra risk.
+
+### Missed Or Weak Signals
+
+- This follow-up did not reveal a stronger new blocker than the existing signed-download finding, but it did show that file-level AI SDK presence should be reported once per file instead of once per matching line.
+
+### Scanner Improvements Made
+
+- Deduplicated `openai-sdk-usage` to one file-level hit per source file so AI review prompts stay visible without repeated noise from import-plus-constructor patterns.
