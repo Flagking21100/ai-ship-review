@@ -113,6 +113,11 @@ SIGNED_DOWNLOAD_OPERATION_PATTERN = re.compile(
     re.DOTALL,
 )
 
+EXPORTED_ASYNC_OPERATION_PATTERN = re.compile(
+    r"export\s+const\s+(?P<name>\w+)\s*=\s*async\s*\((?P<params>[^)]*)\)\s*=>\s*{(?P<body>.*?)};",
+    re.DOTALL,
+)
+
 PUBLIC_UPLOAD_ACCESS_PATTERN = re.compile(
     r"(?i)(access\s*:\s*['\"]public['\"]|acl\s*:\s*['\"]public-read['\"])"
 )
@@ -269,6 +274,7 @@ def find_risky_code_signals(root: Path) -> list[dict[str, str]]:
                     if kind in FILE_LEVEL_RISKY_KINDS:
                         file_level_hits.add(kind)
         hits.extend(find_signed_download_auth_signals(path, root, text))
+        hits.extend(find_file_claim_ownership_signals(path, root, text))
         hits.extend(find_seed_credential_signals(path, root, text))
         hits.extend(find_public_upload_access_signals(path, root, text))
         hits.extend(find_auth_callback_origin_redirect_signals(path, root, text))
@@ -301,6 +307,49 @@ def find_signed_download_auth_signals(path: Path, root: Path, text: str) -> list
                 "line": str(line_no),
                 "kind": "signed-download-no-auth",
                 "message": "Signed download URL operation lacks evident auth or ownership checks.",
+                "signal": name,
+            }
+        )
+    return hits
+
+
+def find_file_claim_ownership_signals(path: Path, root: Path, text: str) -> list[dict[str, str]]:
+    hits = []
+    for match in EXPORTED_ASYNC_OPERATION_PATTERN.finditer(text):
+        name = match.group("name")
+        params = match.group("params")
+        body = match.group("body")
+        combined = f"{params}\n{body}"
+        if not re.search(r"(?i)(file|upload|s3|blob|storage)", name):
+            continue
+        if "context.user" not in body:
+            continue
+        if not re.search(r"(?i)\bs3Key\b", combined):
+            continue
+        if not re.search(r"(?i)(checkFileExistsInS3|HeadObjectCommand|headObject|storage\.head|blob\.head)", body):
+            continue
+        if not re.search(r"(?i)(create|insert)\s*\(", body):
+            continue
+        if not re.search(r"(?i)(s3Key|key)\s*:\s*args\.s3Key", body):
+            continue
+        if not re.search(r"(?i)user\s*:\s*{\s*connect\s*:\s*{\s*id\s*:\s*context\.user\.id", body):
+            continue
+        if re.search(
+            r"(?i)(startsWith\(\s*(?:`?\$\{?\s*context\.user\.id|context\.user\.id)|"
+            r"includes\(\s*(?:`?\$\{?\s*context\.user\.id|context\.user\.id)|"
+            r"split\(['\"]\/['\"]\)\[0\]\s*===?\s*context\.user\.id|"
+            r"owner|ownership|where:\s*{\s*.*user.*context\.user\.id)",
+            body,
+        ):
+            continue
+
+        line_no = text[: match.start()].count("\n") + 1
+        hits.append(
+            {
+                "file": rel(path, root),
+                "line": str(line_no),
+                "kind": "file-key-claim-no-ownership",
+                "message": "File metadata operation stores a caller-supplied object key for the current user after only an existence check; verify the key is bound to that user.",
                 "signal": name,
             }
         )

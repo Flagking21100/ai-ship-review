@@ -133,6 +133,58 @@ def test_scan_repo_detects_public_upload_access(tmp_path: Path) -> None:
     assert "public-upload-access" in kinds
 
 
+def test_scan_repo_detects_file_key_claim_without_ownership_check(tmp_path: Path) -> None:
+    repo = tmp_path / "sample"
+    repo.mkdir()
+    (repo / "fileOps.ts").write_text(
+        "\n".join(
+            [
+                "export const addFileToDb = async (rawArgs, context) => {",
+                "  if (!context.user) throw new HttpError(401);",
+                "  const args = ensureArgsSchemaOrThrowHttpError(schema, rawArgs);",
+                "  const fileExists = await checkFileExistsInS3({ s3Key: args.s3Key });",
+                "  if (!fileExists) throw new HttpError(404);",
+                "  return context.entities.File.create({",
+                "    data: {",
+                "      s3Key: args.s3Key,",
+                "      user: { connect: { id: context.user.id } },",
+                "    },",
+                "  });",
+                "};",
+                "",
+                "export const addFileToDbSafely = async (rawArgs, context) => {",
+                "  if (!context.user) throw new HttpError(401);",
+                "  const args = ensureArgsSchemaOrThrowHttpError(schema, rawArgs);",
+                "  if (!args.s3Key.startsWith(`${context.user.id}/`)) throw new HttpError(403);",
+                "  const fileExists = await checkFileExistsInS3({ s3Key: args.s3Key });",
+                "  if (!fileExists) throw new HttpError(404);",
+                "  return context.entities.File.create({",
+                "    data: {",
+                "      s3Key: args.s3Key,",
+                "      user: { connect: { id: context.user.id } },",
+                "    },",
+                "  });",
+                "};",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    script = Path(__file__).resolve().parents[1] / "scripts" / "scan_repo.py"
+    completed = subprocess.run(
+        [sys.executable, str(script), str(repo), "--json"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    data = json.loads(completed.stdout)
+    flagged = [hit for hit in data["risky_code_signals"] if hit["kind"] == "file-key-claim-no-ownership"]
+    assert len(flagged) == 1
+    assert flagged[0]["file"] == "fileOps.ts"
+    assert flagged[0]["signal"] == "addFileToDb"
+
+
 def test_scan_repo_detects_auth_callback_request_origin_redirect_and_ignores_general_site_url_helpers(
     tmp_path: Path,
 ) -> None:

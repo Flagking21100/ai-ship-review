@@ -491,3 +491,44 @@ Decision: The inspected AI and file flows show reasonable starter auth checks, b
 ### Scanner Improvements Made
 
 - Deduplicated `openai-sdk-usage` to one file-level hit per source file so AI review prompts stay visible without repeated noise from import-plus-constructor patterns.
+
+## Case 12: wasp-lang/open-saas (file ownership follow-up)
+
+Repository: https://github.com/wasp-lang/open-saas
+
+Local test method: partial local snapshot reconstructed from inspected public files because network-restricted shell access prevented cloning.
+
+Type: Wasp SaaS template with auth, payments, AI demo, S3 uploads, and deployment tooling
+
+### Ship Decision
+
+```text
+Ship Readiness: Ready with caution
+Score: 66 / 100
+Decision: The upload flow still should not ship unchanged because file metadata can be claimed with any existing object key, and the signed-download path remains under-protected.
+```
+
+### What AI Ship Review Caught Well
+
+- `template/app/src/file-upload/s3Utils.ts` namespaces upload keys under `${userId}/...`, which made the intended ownership model explicit enough to verify manually.
+- The scanner still surfaced `getDownloadFileSignedURL` as a missing-auth review point and continued to flag the weak webhook placeholder in `.env.server.example`.
+- The snapshot still exposes no visible CI or automated tests, so the skill correctly keeps the confidence level below production-ready.
+
+### Main Launch Risks
+
+- `template/app/src/file-upload/operations.ts` lets an authenticated caller submit any `s3Key`, performs only `checkFileExistsInS3({ s3Key: args.s3Key })`, and then stores that key under `context.user.id` via `context.entities.File.create(...)`. If another valid object key is discovered, a user can claim metadata for someone else's uploaded file.
+- `template/app/src/file-upload/operations.ts` also still returns signed download URLs directly from caller-supplied `s3Key` values without evident ownership enforcement.
+- The partial snapshot still does not show tests or operator guidance that would reduce confidence risks around upload abuse, cleanup, and incident response.
+
+### False Positives
+
+- None from this follow-up. The new ownership signal stayed narrow in regression coverage and did not fire on a safe variant that verifies `args.s3Key.startsWith(\`${context.user.id}/\`)` before persisting the file record.
+
+### Missed Or Weak Signals
+
+- Before this run, the scanner noticed unauthenticated signed downloads but not the adjacent file-claim path that persists user-supplied storage keys after only an existence check.
+- The scanner still does not reason about whether upload object names are unguessable enough in templates that expose them back to the client.
+
+### Scanner Improvements Made
+
+- Added `file-key-claim-no-ownership` for file metadata operations that attach a caller-supplied storage key to the current user after only an existence check and without visible ownership or prefix validation.
