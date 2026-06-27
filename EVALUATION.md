@@ -532,3 +532,43 @@ Decision: The upload flow still should not ship unchanged because file metadata 
 ### Scanner Improvements Made
 
 - Added `file-key-claim-no-ownership` for file metadata operations that attach a caller-supplied storage key to the current user after only an existence check and without visible ownership or prefix validation.
+
+## Case 13: midday-ai/midday (env template follow-up)
+
+Repository: https://github.com/midday-ai/midday
+
+Local test method: partial local snapshot reconstructed from inspected public files because network-restricted shell access prevented cloning.
+
+Type: AI-enabled finance/SaaS platform with assistant tooling, webhook integrations, and broad third-party secret surface area
+
+### Ship Decision
+
+```text
+Ship Readiness: Ready with caution
+Score: 74 / 100
+Decision: The inspected assistant wiring looks reasonably scoped, but the checked-in env templates still normalize weak copy-paste secret defaults that production teams should replace before deployment.
+```
+
+### What AI Ship Review Caught Well
+
+- `apps/api/src/bot/runtime.ts` builds the assistant MCP context from a connected conversation's team and user identifiers, and `apps/api/src/chat/assistant-runtime.ts` keeps the model/tool loop server-side rather than exposing raw tool execution to the client.
+- The scanner already caught several weak env-template placeholders in the snapshot, including `INVOICE_JWT_SECRET=secret` and `FILE_KEY_SECRET=secret`.
+- The partial snapshot made the confidence boundary explicit: missing CI/tests in the local snapshot are treated as a limitation of the evaluation method, not proof that the repository lacks them globally.
+
+### Main Launch Risks
+
+- `apps/dashboard/.env-example` includes `WEBHOOK_SECRET_KEY=6c369443-1a88-444e-b459-7e662c1fff9e`, a fixed UUID-shaped secret value that looks plausible enough to be copied unchanged into real deployments. That is safer than a real leaked secret, but still weak bootstrap guidance for webhook auth.
+- The inspected env templates also include multiple other placeholder-sensitive values such as `INVOICE_JWT_SECRET=secret`, `FILE_KEY_SECRET=secret`, and `STRIPE_CONNECT_WEBHOOK_SECRET=your_webhook_secret_here`, so operators still need stronger replace-before-run discipline.
+- This snapshot was too narrow to verify rate limits, webhook verification paths, or broader deployment/rollback coverage across the full repository.
+
+### False Positives
+
+- The scanner's `hardcoded-url` hit on `apps/api/src/bot/runtime.ts` for the fallback `https://api.midday.ai` is review noise in this case; it is a normal canonical API base URL default rather than an operational secret or launch blocker.
+
+### Missed Or Weak Signals
+
+- Before this run, env-template scanning did not flag UUID-shaped fixed values assigned to sensitive names such as `WEBHOOK_SECRET_KEY`, even though those values are easy to ship unchanged by mistake.
+
+### Scanner Improvements Made
+
+- Expanded `weak-env-placeholder` detection so sensitive env vars using fixed UUID values in checked-in templates are flagged alongside simpler placeholders like `secret` and `your_webhook_secret_here`.

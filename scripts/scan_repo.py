@@ -145,6 +145,10 @@ PLACEHOLDER_SENSITIVE_VALUE_PATTERN = re.compile(
     r"[-_a-z0-9]*(?:secret|password|token|key)[-_a-z0-9]*$"
 )
 
+UUID_VALUE_PATTERN = re.compile(
+    r"(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+)
+
 WEAK_PASSWORD_LITERAL_PATTERN = re.compile(
     r"(?i)^(admin123|password|secret|changeme|test123|demo123|supersecretpassword|123456)$"
 )
@@ -470,7 +474,10 @@ def is_placeholder_secret_template_value(line: str) -> bool:
     normalized_value = value.strip().strip("'\"")
     if not normalized_value:
         return False
-    return bool(PLACEHOLDER_SENSITIVE_VALUE_PATTERN.search(normalized_value))
+    return bool(
+        PLACEHOLDER_SENSITIVE_VALUE_PATTERN.search(normalized_value)
+        or UUID_VALUE_PATTERN.search(normalized_value)
+    )
 
 
 def is_compose_file(path: Path) -> bool:
