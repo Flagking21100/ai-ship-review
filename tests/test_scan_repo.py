@@ -392,6 +392,67 @@ def test_scan_repo_detects_openai_sdk_usage_and_implicit_env(tmp_path: Path) -> 
     assert openai_hits[0]["line"] == "1"
 
 
+def test_scan_repo_detects_auth_rate_limit_fail_open(tmp_path: Path) -> None:
+    repo = tmp_path / "sample"
+    repo.mkdir()
+    (repo / "auth.ts").write_text(
+        "\n".join(
+            [
+                "const authOptions = {",
+                "  callbacks: {",
+                "    signIn: async ({ user }) => {",
+                "      try {",
+                "        const rateLimitResult = await checkRateLimit(rateLimiters.auth, clientIP);",
+                "        if (!rateLimitResult.success) {",
+                "          return false;",
+                "        }",
+                "      } catch (error) {}",
+                "      return !!user.email;",
+                "    },",
+                "  },",
+                "};",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (repo / "safe_auth.ts").write_text(
+        "\n".join(
+            [
+                "const authOptions = {",
+                "  callbacks: {",
+                "    signIn: async ({ user }) => {",
+                "      try {",
+                "        const rateLimitResult = await checkRateLimit(rateLimiters.auth, clientIP);",
+                "        if (!rateLimitResult.success) {",
+                "          return false;",
+                "        }",
+                "      } catch (error) {",
+                "        return false;",
+                "      }",
+                "      return !!user.email;",
+                "    },",
+                "  },",
+                "};",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    script = Path(__file__).resolve().parents[1] / "scripts" / "scan_repo.py"
+    completed = subprocess.run(
+        [sys.executable, str(script), str(repo), "--json"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    data = json.loads(completed.stdout)
+    flagged = [hit for hit in data["risky_code_signals"] if hit["kind"] == "auth-rate-limit-fail-open"]
+    assert len(flagged) == 1
+    assert flagged[0]["file"] == "auth.ts"
+    assert flagged[0]["signal"] == "catch (error) {}"
+
+
 def test_scan_repo_reports_missing_tests_and_ci(tmp_path: Path) -> None:
     repo = tmp_path / "sample"
     repo.mkdir()

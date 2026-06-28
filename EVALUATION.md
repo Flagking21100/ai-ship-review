@@ -572,3 +572,43 @@ Decision: The inspected assistant wiring looks reasonably scoped, but the checke
 ### Scanner Improvements Made
 
 - Expanded `weak-env-placeholder` detection so sensitive env vars using fixed UUID values in checked-in templates are flagged alongside simpler placeholders like `secret` and `your_webhook_secret_here`.
+
+## Case 14: papermark/papermark (auth abuse-control follow-up)
+
+Repository: https://github.com/papermark/papermark
+
+Local test method: partial local snapshot reconstructed from inspected public files because network-restricted shell access prevented cloning.
+
+Type: Next.js document-sharing SaaS with NextAuth, rate limiting, blob storage, AI, and payment/deployment integrations
+
+### Ship Decision
+
+```text
+Ship Readiness: Ready with caution
+Score: 73 / 100
+Decision: Reasonable starter posture, but the inspected auth flow should fail closed when abuse-protection checks break.
+```
+
+### What AI Ship Review Caught Well
+
+- `pages/api/auth/[...nextauth].ts` clearly applies a sign-in rate limit through `checkRateLimit(rateLimiters.auth, clientIP)`, so the project does show real abuse-control intent rather than omitting the check entirely.
+- The snapshot still documents sensitive production configuration in `.env.example`, including auth and document-password secrets, which remains useful operational context.
+- The partial-snapshot review kept its confidence boundary explicit: missing tests were treated as a visible risk in the inspected files, not a claim about the entire upstream repository.
+
+### Main Launch Risks
+
+- `pages/api/auth/[...nextauth].ts` wraps the sign-in rate-limit call in `try { ... } catch (error) {}` and then falls through to `return !!user.email;`. If the rate-limit backend throws or becomes unavailable, login appears to fail open instead of denying or degrading safely.
+- The same file therefore converts an abuse-protection outage into silently weaker auth hardening, which is especially relevant on public sign-in routes that are likely to attract credential-stuffing or signup abuse.
+- The reviewed snapshot still did not expose broader auth verification coverage, so this finding should be read as a concrete inspected risk rather than a complete auth audit.
+
+### False Positives
+
+- None from this follow-up. The new rule stayed narrow by requiring a sign-in callback, a rate-limit/security check, an empty catch block, and an allow-style return.
+
+### Missed Or Weak Signals
+
+- Before this run, the scanner did not detect fail-open auth flows where a sign-in callback swallows rate-limit/security errors and then still allows the user path to proceed.
+
+### Scanner Improvements Made
+
+- Added `auth-rate-limit-fail-open` for sign-in/auth callback code that combines a rate-limit check, an empty catch block, and a subsequent allow-style return such as `return true` or `return !!user.email`.

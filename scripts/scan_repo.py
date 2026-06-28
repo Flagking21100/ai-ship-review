@@ -282,6 +282,7 @@ def find_risky_code_signals(root: Path) -> list[dict[str, str]]:
         hits.extend(find_seed_credential_signals(path, root, text))
         hits.extend(find_public_upload_access_signals(path, root, text))
         hits.extend(find_auth_callback_origin_redirect_signals(path, root, text))
+        hits.extend(find_auth_fail_open_rate_limit_signals(path, root, text))
     return hits[:100]
 
 
@@ -433,6 +434,29 @@ def find_auth_callback_origin_redirect_signals(path: Path, root: Path, text: str
             "kind": "auth-callback-request-origin",
             "message": "Auth callback redirect derives its base URL from the incoming request origin; verify trusted host handling or prefer a configured site URL.",
             "signal": origin_match.group(0),
+        }
+    ]
+
+
+def find_auth_fail_open_rate_limit_signals(path: Path, root: Path, text: str) -> list[dict[str, str]]:
+    if "signIn: async" not in text:
+        return []
+    if not re.search(r"(?i)(checkRateLimit|rateLimit)", text):
+        return []
+    if not re.search(r"catch\s*\([^)]*\)\s*{\s*}", text, re.DOTALL):
+        return []
+    if not re.search(r"return\s+(?:true|!!\s*user(?:\.\w+)?)\s*;", text):
+        return []
+
+    catch_match = re.search(r"catch\s*\([^)]*\)\s*{\s*}", text, re.DOTALL)
+    line_no = text[: catch_match.start()].count("\n") + 1
+    return [
+        {
+            "file": rel(path, root),
+            "line": str(line_no),
+            "kind": "auth-rate-limit-fail-open",
+            "message": "Auth sign-in flow swallows rate-limit errors and then allows login; verify abuse controls fail closed when protection checks break.",
+            "signal": catch_match.group(0),
         }
     ]
 
