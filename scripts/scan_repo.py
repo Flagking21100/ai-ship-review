@@ -283,6 +283,7 @@ def find_risky_code_signals(root: Path) -> list[dict[str, str]]:
         hits.extend(find_public_upload_access_signals(path, root, text))
         hits.extend(find_auth_callback_origin_redirect_signals(path, root, text))
         hits.extend(find_auth_fail_open_rate_limit_signals(path, root, text))
+        hits.extend(find_guest_auth_without_rate_limit_signals(path, root, text))
     return hits[:100]
 
 
@@ -457,6 +458,35 @@ def find_auth_fail_open_rate_limit_signals(path: Path, root: Path, text: str) ->
             "kind": "auth-rate-limit-fail-open",
             "message": "Auth sign-in flow swallows rate-limit errors and then allows login; verify abuse controls fail closed when protection checks break.",
             "signal": catch_match.group(0),
+        }
+    ]
+
+
+def find_guest_auth_without_rate_limit_signals(path: Path, root: Path, text: str) -> list[dict[str, str]]:
+    guest_id_match = re.search(r"id\s*:\s*['\"]guest['\"]", text)
+    if not guest_id_match:
+        return []
+
+    block_end = text.find("}),", guest_id_match.start())
+    if block_end == -1:
+        block_end = min(len(text), guest_id_match.start() + 1500)
+    provider_block = text[guest_id_match.start():block_end]
+
+    if not re.search(r"async\s+authorize\s*\([^)]*\)", provider_block):
+        return []
+    if not re.search(r"(?i)(createGuestUser\s*\(|insert\s*\()", provider_block):
+        return []
+    if re.search(r"(?i)(checkRateLimit|rateLimit|throttle|limiter)", provider_block):
+        return []
+
+    line_no = text[: guest_id_match.start()].count("\n") + 1
+    return [
+        {
+            "file": rel(path, root),
+            "line": str(line_no),
+            "kind": "guest-auth-no-rate-limit",
+            "message": "Guest-account auth path creates a user without visible abuse controls; verify anonymous account creation is rate-limited and cleaned up.",
+            "signal": guest_id_match.group(0),
         }
     ]
 

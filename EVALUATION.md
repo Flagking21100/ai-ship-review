@@ -612,3 +612,44 @@ Decision: Reasonable starter posture, but the inspected auth flow should fail cl
 ### Scanner Improvements Made
 
 - Added `auth-rate-limit-fail-open` for sign-in/auth callback code that combines a rate-limit check, an empty catch block, and a subsequent allow-style return such as `return true` or `return !!user.email`.
+
+## Case 15: vercel/ai-chatbot (guest account abuse-control follow-up)
+
+Repository: https://github.com/vercel/ai-chatbot
+
+Local test method: partial local snapshot reconstructed from inspected public files because network-restricted shell access prevented cloning.
+
+Type: Next.js AI chatbot starter with guest auth, Postgres persistence, Redis-backed chat throttling, and public blob uploads
+
+### Ship Decision
+
+```text
+Ship Readiness: Ready with caution
+Score: 72 / 100
+Decision: The inspected chat path is reasonably guarded, but anonymous account creation should not ship broadly without abuse controls on the guest login path.
+```
+
+### What AI Ship Review Caught Well
+
+- `app/(chat)/api/chat/route.ts` requires `session.user`, rate-limits by IP via `checkIpRateLimit(ipAddress(request))`, and enforces a per-user message cap before continuing the chat flow.
+- `app/(chat)/api/files/upload/route.ts` still surfaces the earlier `public-upload-access` review prompt, which remains relevant for teams adapting the starter to sensitive file uploads.
+- `.env.example` uses masked placeholders (`****`) rather than teaching copy-pasteable weak secrets, which is better bootstrap hygiene than many starter templates.
+
+### Main Launch Risks
+
+- `app/(auth)/auth.ts` defines a `Credentials({ id: "guest", ... })` provider whose `authorize()` body calls `createGuestUser()` directly and returns a fresh account without any visible rate limit, CAPTCHA, proof-of-work, or similar abuse control in the inspected path.
+- `lib/db/queries.ts` implements `createGuestUser()` by inserting a new user record with an email derived from `Date.now()`, so repeated anonymous auth hits can create durable database rows rather than ephemeral session-only guests.
+- `app/(auth)/actions.ts` also allows direct credential registration with only a six-character password minimum, and the inspected snapshot still did not show email verification or signup throttling. That makes the missing guest-path abuse control more important, not less.
+
+### False Positives
+
+- `missing-tests` and `missing-ci` remained snapshot-bound noise for this local reconstruction because `package.json` advertises a Playwright test command even though the corresponding files were not present in the partial snapshot.
+
+### Missed Or Weak Signals
+
+- Before this run, the scanner did not flag guest or anonymous auth providers that create persisted user accounts without visible abuse controls.
+- The scanner still does not reason about lifecycle cleanup for guest users after creation; that remains manual review territory.
+
+### Scanner Improvements Made
+
+- Added `guest-auth-no-rate-limit` for guest-account auth providers that create users in `authorize()` without visible rate limiting or throttling nearby.

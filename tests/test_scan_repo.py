@@ -453,6 +453,62 @@ def test_scan_repo_detects_auth_rate_limit_fail_open(tmp_path: Path) -> None:
     assert flagged[0]["signal"] == "catch (error) {}"
 
 
+def test_scan_repo_detects_guest_auth_without_rate_limit(tmp_path: Path) -> None:
+    repo = tmp_path / "sample"
+    repo.mkdir()
+    (repo / "auth.ts").write_text(
+        "\n".join(
+            [
+                "import Credentials from 'next-auth/providers/credentials';",
+                "providers: [",
+                "  Credentials({",
+                "    id: 'guest',",
+                "    credentials: {},",
+                "    async authorize() {",
+                "      const [guestUser] = await createGuestUser();",
+                "      return { ...guestUser, type: 'guest' };",
+                "    },",
+                "  }),",
+                "]",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (repo / "safe_auth.ts").write_text(
+        "\n".join(
+            [
+                "import Credentials from 'next-auth/providers/credentials';",
+                "providers: [",
+                "  Credentials({",
+                "    id: 'guest',",
+                "    credentials: {},",
+                "    async authorize() {",
+                "      await checkRateLimit(rateLimiters.guest, clientIP);",
+                "      const [guestUser] = await createGuestUser();",
+                "      return { ...guestUser, type: 'guest' };",
+                "    },",
+                "  }),",
+                "]",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    script = Path(__file__).resolve().parents[1] / "scripts" / "scan_repo.py"
+    completed = subprocess.run(
+        [sys.executable, str(script), str(repo), "--json"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    data = json.loads(completed.stdout)
+    flagged = [hit for hit in data["risky_code_signals"] if hit["kind"] == "guest-auth-no-rate-limit"]
+    assert len(flagged) == 1
+    assert flagged[0]["file"] == "auth.ts"
+    assert flagged[0]["signal"] == "id: 'guest'"
+
+
 def test_scan_repo_reports_missing_tests_and_ci(tmp_path: Path) -> None:
     repo = tmp_path / "sample"
     repo.mkdir()
