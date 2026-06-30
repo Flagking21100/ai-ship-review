@@ -653,3 +653,43 @@ Decision: The inspected chat path is reasonably guarded, but anonymous account c
 ### Scanner Improvements Made
 
 - Added `guest-auth-no-rate-limit` for guest-account auth providers that create users in `authorize()` without visible rate limiting or throttling nearby.
+
+## Case 16: dubinc/dub (env placeholder follow-up)
+
+Repository: https://github.com/dubinc/dub
+
+Local test method: partial local snapshot reconstructed from inspected public files because network-restricted shell access prevented cloning.
+
+Type: Next.js SaaS application with auth, billing, storage, middleware logging, and deployment-oriented local infrastructure
+
+### Ship Decision
+
+```text
+Ship Readiness: Ready with caution
+Score: 78 / 100
+Decision: The inspected local-only infrastructure shortcuts remain the main risk, and the env template still teaches at least one copy-pasteable password placeholder that production operators should replace explicitly.
+```
+
+### What AI Ship Review Caught Well
+
+- `apps/web/lib/storage.ts` still shows stronger-than-average SSRF protections for remote image fetching, including protocol checks, DNS resolution, and private-address blocking before direct fetch fallback.
+- The snapshot still includes visible CI and test structure, so confidence is higher than in many partial starter snapshots.
+- The existing `compose-empty-db-password` signal remains a good fit for `apps/web/docker-compose.yml`, which intentionally weakens MySQL auth for local development.
+
+### Main Launch Risks
+
+- `apps/web/.env.example` sets `SMTP_PASSWORD=smtpPassword`. That is not a leaked secret, but it is a realistic-looking fixed password placeholder that can be copied unchanged into preview or production environments.
+- `apps/web/docker-compose.yml` still allows an empty MySQL password and exposes local-only ports; that remains acceptable for local development but unsafe to cargo-cult into shared environments.
+- `apps/web/middleware.ts` continues to send transformed request data to Axiom, and the inspected snapshot still does not prove what fields are redacted before logging.
+
+### False Positives
+
+- `apps/web/lib/storage.ts` still triggers `hardcoded-url` for `https://wsrv.nl`, but manual review shows that URL is a deliberate image-proxy dependency rather than a launch blocker.
+
+### Missed Or Weak Signals
+
+- Before this run, env-template scanning did not flag generic service-shaped placeholders such as `smtpPassword` when they were assigned to sensitive env vars.
+
+### Scanner Improvements Made
+
+- Expanded `weak-env-placeholder` detection to catch generic service-prefixed sensitive placeholders like `SMTP_PASSWORD=smtpPassword` in checked-in env templates.

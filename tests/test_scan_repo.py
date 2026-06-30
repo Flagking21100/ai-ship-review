@@ -302,6 +302,7 @@ def test_scan_repo_detects_placeholder_secret_values_in_env_templates(tmp_path: 
                 "NEXTAUTH_SECRET=my-superstrong-secret",
                 "HANKO_API_KEY=add-your-hanko-api-key",
                 "WEBHOOK_SECRET_KEY=6c369443-1a88-444e-b459-7e662c1fff9e",
+                "SMTP_PASSWORD=smtpPassword",
                 "NEXT_PUBLIC_SITE_URL=https://example.com",
                 "NORMAL_NAME=example-value",
             ]
@@ -322,6 +323,7 @@ def test_scan_repo_detects_placeholder_secret_values_in_env_templates(tmp_path: 
     assert "NEXTAUTH_SECRET=my-superstrong-secret" in signals
     assert "HANKO_API_KEY=add-your-hanko-api-key" in signals
     assert "WEBHOOK_SECRET_KEY=6c369443-1a88-444e-b459-7e662c1fff9e" in signals
+    assert "SMTP_PASSWORD=smtpPassword" in signals
     assert "NEXT_PUBLIC_SITE_URL=https://example.com" not in signals
 
 

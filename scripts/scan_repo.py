@@ -145,6 +145,8 @@ PLACEHOLDER_SENSITIVE_VALUE_PATTERN = re.compile(
     r"[-_a-z0-9]*(?:secret|password|token|key)[-_a-z0-9]*$"
 )
 
+GENERIC_SENSITIVE_SUFFIXES = ("secret", "password", "token", "key")
+
 UUID_VALUE_PATTERN = re.compile(
     r"(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 )
@@ -531,7 +533,19 @@ def is_placeholder_secret_template_value(line: str) -> bool:
     return bool(
         PLACEHOLDER_SENSITIVE_VALUE_PATTERN.search(normalized_value)
         or UUID_VALUE_PATTERN.search(normalized_value)
+        or looks_like_generic_sensitive_placeholder(normalized_value)
     )
+
+
+def looks_like_generic_sensitive_placeholder(value: str) -> bool:
+    lower = value.lower()
+    for suffix in GENERIC_SENSITIVE_SUFFIXES:
+        if not lower.endswith(suffix):
+            continue
+        prefix = lower[: -len(suffix)]
+        if prefix and re.fullmatch(r"[a-z0-9_-]{2,24}", prefix):
+            return True
+    return False
 
 
 def is_compose_file(path: Path) -> bool:
