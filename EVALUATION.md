@@ -693,3 +693,43 @@ Decision: The inspected local-only infrastructure shortcuts remain the main risk
 ### Scanner Improvements Made
 
 - Expanded `weak-env-placeholder` detection to catch generic service-prefixed sensitive placeholders like `SMTP_PASSWORD=smtpPassword` in checked-in env templates.
+
+## Case 17: midday-ai/midday (public key placeholder boundary)
+
+Repository: https://github.com/midday-ai/midday
+
+Local test method: partial local snapshot reconstructed from inspected public files because network-restricted shell access prevented cloning.
+
+Type: AI-enabled finance/SaaS platform with assistant tooling, webhook integrations, Stripe config, and broad third-party secret surface area
+
+### Ship Decision
+
+```text
+Ship Readiness: Ready with caution
+Score: 74 / 100
+Decision: The inspected assistant path remains reasonably scoped, but secret-heavy env templates still need stronger replace-before-deploy discipline.
+```
+
+### What AI Ship Review Caught Well
+
+- `apps/api/src/chat/assistant-runtime.ts` keeps the model/tool loop server-side, passes a bounded MCP context, and caps tool-loop execution with `stepCountIs(10)`.
+- The scanner still flags meaningful secret placeholders such as `FILE_KEY_SECRET=secret`, `STRIPE_SECRET_KEY=your_secret_key_here`, `STRIPE_CONNECT_WEBHOOK_SECRET=your_webhook_secret_here`, `WEBHOOK_SECRET_KEY=6c369443-1a88-444e-b459-7e662c1fff9e`, and `INVOICE_JWT_SECRET=secret`.
+- The partial-snapshot boundary is still clear: local missing-test and missing-CI signals are prompts for manual follow-up, not definitive claims about the full upstream repository.
+
+### Main Launch Risks
+
+- The checked-in env templates include many true secret-bearing integrations across finance, AI, email, webhooks, and storage, so copied placeholder values remain a realistic production setup risk.
+- `apps/api/src/bot/runtime.ts` uses a canonical fallback `https://api.midday.ai`; this is not a blocker, but deployments should confirm the intended API base URL per environment.
+- The reviewed snapshot was too narrow to verify webhook signature handling, broader tool permission enforcement, or production rollback guidance.
+
+### False Positives
+
+- `STRIPE_PUBLISHABLE_KEY=your_publishable_key_here` and `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=your_publishable_key_here` were previously reported as weak secret placeholders only because the names contain `KEY`. Manual review classifies these as public client configuration, unlike `STRIPE_SECRET_KEY` and webhook secrets.
+
+### Missed Or Weak Signals
+
+- Before this run, env-template scanning treated public/publishable key names the same as true secrets, which added noise in Stripe/Supabase-style applications.
+
+### Scanner Improvements Made
+
+- Narrowed env-template sensitivity so `SECRET`, `PASSWORD`, and `TOKEN` remain sensitive, while `KEY` is ignored for explicitly public or publishable env names such as `NEXT_PUBLIC_*` and `*_PUBLISHABLE_KEY`.

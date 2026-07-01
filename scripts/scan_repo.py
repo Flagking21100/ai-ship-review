@@ -134,11 +134,9 @@ HTTP_HANDLER_CONTEXT_PATTERN = re.compile(
     r"(?i)(export\s+async\s+function\s+(POST|PUT)|new\s+NextResponse|Request\b|NextRequest\b)"
 )
 
-WEAK_ENV_VALUE_PATTERN = re.compile(
-    r"(?i)^(?:[A-Z0-9_]*(?:SECRET|PASSWORD|TOKEN|KEY)[A-Z0-9_]*)=(secret|changeme|password|supersecretpassword|123|test|admin)$"
-)
+WEAK_TEMPLATE_LITERAL_VALUES = {"secret", "changeme", "password", "supersecretpassword", "123", "test", "admin"}
 
-SENSITIVE_ENV_NAME_PATTERN = re.compile(r"(?i)(SECRET|PASSWORD|TOKEN|KEY)")
+PUBLIC_KEY_ENV_NAME_PATTERN = re.compile(r"(?i)(^NEXT_PUBLIC_|^VITE_|^PUBLIC_|PUBLISHABLE)")
 
 PLACEHOLDER_SENSITIVE_VALUE_PATTERN = re.compile(
     r"(?i)^(?:add|set|replace|insert|your|my|example|sample|dummy|test|demo|placeholder)"
@@ -508,7 +506,7 @@ def find_env_template_risks(root: Path) -> list[dict[str, str]]:
             stripped = line.strip()
             if not stripped or stripped.startswith("#"):
                 continue
-            if WEAK_ENV_VALUE_PATTERN.search(stripped) or is_placeholder_secret_template_value(stripped):
+            if is_weak_secret_template_literal(stripped) or is_placeholder_secret_template_value(stripped):
                 hits.append(
                     {
                         "file": rel(path, root),
@@ -525,7 +523,7 @@ def is_placeholder_secret_template_value(line: str) -> bool:
     if "=" not in line:
         return False
     name, value = line.split("=", 1)
-    if not SENSITIVE_ENV_NAME_PATTERN.search(name):
+    if not is_sensitive_env_name(name):
         return False
     normalized_value = value.strip().strip("'\"")
     if not normalized_value:
@@ -535,6 +533,24 @@ def is_placeholder_secret_template_value(line: str) -> bool:
         or UUID_VALUE_PATTERN.search(normalized_value)
         or looks_like_generic_sensitive_placeholder(normalized_value)
     )
+
+
+def is_weak_secret_template_literal(line: str) -> bool:
+    if "=" not in line:
+        return False
+    name, value = line.split("=", 1)
+    if not is_sensitive_env_name(name):
+        return False
+    normalized_value = value.strip().strip("'\"").lower()
+    return normalized_value in WEAK_TEMPLATE_LITERAL_VALUES
+
+
+def is_sensitive_env_name(name: str) -> bool:
+    if re.search(r"(?i)(SECRET|PASSWORD|TOKEN)", name):
+        return True
+    if re.search(r"(?i)KEY", name):
+        return not PUBLIC_KEY_ENV_NAME_PATTERN.search(name)
+    return False
 
 
 def looks_like_generic_sensitive_placeholder(value: str) -> bool:
