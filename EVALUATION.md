@@ -733,3 +733,44 @@ Decision: The inspected assistant path remains reasonably scoped, but secret-hea
 ### Scanner Improvements Made
 
 - Narrowed env-template sensitivity so `SECRET`, `PASSWORD`, and `TOKEN` remain sensitive, while `KEY` is ignored for explicitly public or publishable env names such as `NEXT_PUBLIC_*` and `*_PUBLISHABLE_KEY`.
+
+## Case 18: nextjs/saas-starter (password auth abuse-control follow-up)
+
+Repository: https://github.com/nextjs/saas-starter
+
+Local test method: partial local snapshot reconstructed from inspected public files because network-restricted shell access prevented cloning.
+
+Type: Next.js SaaS starter with password auth, session cookies, database-backed users, Stripe billing, and deployment-oriented scripts
+
+### Ship Decision
+
+```text
+Ship Readiness: Ready with caution
+Score: 71 / 100
+Decision: The starter is useful production scaffolding, but password auth entry points need explicit abuse controls before broad public launch.
+```
+
+### What AI Ship Review Caught Well
+
+- The scanner continues to surface the expected missing local tests and CI/deployment workflow signals in a narrow snapshot, which is useful as a confidence boundary rather than a full-repo claim.
+- Empty secret entries in `.env.example` such as `AUTH_SECRET`, `STRIPE_SECRET_KEY`, and `STRIPE_WEBHOOK_SECRET` were not flagged as weak placeholders, which is lower-noise than treating every documented secret name as a bad default.
+- The package scripts expose a seed command and production build/start commands, so manual review can quickly pivot into database bootstrap and deploy readiness.
+
+### Main Launch Risks
+
+- `app/(login)/actions.ts` contains password sign-in and sign-up flows that compare/hash passwords and create a session, but the inspected action surface did not show rate limiting, throttling, CAPTCHA, lockout, or equivalent abuse protection nearby.
+- Because users are database-backed and sessions are issued after credential checks, credential stuffing and automated signup abuse are relevant launch risks rather than cosmetic hardening tasks.
+- The partial snapshot did not include enough Stripe route coverage to verify webhook signature handling, subscription entitlement updates, or rollback behavior.
+
+### False Positives
+
+- None from this follow-up. The new signal only fired on the auth action file and did not treat empty env template values as weak secrets.
+
+### Missed Or Weak Signals
+
+- Before this run, the scanner caught guest account creation without rate limits, but missed conventional password sign-in/sign-up actions that lacked visible abuse controls.
+- The scanner still cannot prove whether rate limits are enforced externally at middleware, CDN, or platform level; this remains a manual verification boundary.
+
+### Scanner Improvements Made
+
+- Added `password-auth-no-rate-limit` for auth-like password flows that hash or compare passwords, issue a session, and lack visible rate limiting, throttling, CAPTCHA, or lockout terms nearby.

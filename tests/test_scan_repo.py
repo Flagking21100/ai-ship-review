@@ -517,6 +517,54 @@ def test_scan_repo_detects_guest_auth_without_rate_limit(tmp_path: Path) -> None
     assert flagged[0]["signal"] == "id: 'guest'"
 
 
+def test_scan_repo_detects_password_auth_without_rate_limit(tmp_path: Path) -> None:
+    repo = tmp_path / "sample"
+    repo.mkdir()
+    (repo / "actions.ts").write_text(
+        "\n".join(
+            [
+                "'use server';",
+                "export async function signIn(formData: FormData) {",
+                "  const user = await db.query.users.findFirst({ where: eq(users.email, email) });",
+                "  const passwordMatch = await comparePasswords(password, user.passwordHash);",
+                "  if (!passwordMatch) return { error: 'Invalid credentials' };",
+                "  await setSession(user);",
+                "}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (repo / "safe_actions.ts").write_text(
+        "\n".join(
+            [
+                "'use server';",
+                "export async function signIn(formData: FormData) {",
+                "  await checkRateLimit(rateLimiters.auth, clientIP);",
+                "  const user = await db.query.users.findFirst({ where: eq(users.email, email) });",
+                "  const passwordMatch = await comparePasswords(password, user.passwordHash);",
+                "  if (!passwordMatch) return { error: 'Invalid credentials' };",
+                "  await setSession(user);",
+                "}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    script = Path(__file__).resolve().parents[1] / "scripts" / "scan_repo.py"
+    completed = subprocess.run(
+        [sys.executable, str(script), str(repo), "--json"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    data = json.loads(completed.stdout)
+    flagged = [hit for hit in data["risky_code_signals"] if hit["kind"] == "password-auth-no-rate-limit"]
+    assert len(flagged) == 1
+    assert flagged[0]["file"] == "actions.ts"
+    assert flagged[0]["signal"] == "signIn"
+
+
 def test_scan_repo_reports_missing_tests_and_ci(tmp_path: Path) -> None:
     repo = tmp_path / "sample"
     repo.mkdir()

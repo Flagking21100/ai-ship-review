@@ -284,6 +284,7 @@ def find_risky_code_signals(root: Path) -> list[dict[str, str]]:
         hits.extend(find_auth_callback_origin_redirect_signals(path, root, text))
         hits.extend(find_auth_fail_open_rate_limit_signals(path, root, text))
         hits.extend(find_guest_auth_without_rate_limit_signals(path, root, text))
+        hits.extend(find_password_auth_without_rate_limit_signals(path, root, text))
     return hits[:100]
 
 
@@ -487,6 +488,32 @@ def find_guest_auth_without_rate_limit_signals(path: Path, root: Path, text: str
             "kind": "guest-auth-no-rate-limit",
             "message": "Guest-account auth path creates a user without visible abuse controls; verify anonymous account creation is rate-limited and cleaned up.",
             "signal": guest_id_match.group(0),
+        }
+    ]
+
+
+def find_password_auth_without_rate_limit_signals(path: Path, root: Path, text: str) -> list[dict[str, str]]:
+    if not re.search(r"(?i)(signIn|signUp|login|register)", text):
+        return []
+    if not re.search(r"\b(comparePasswords|hashPassword|bcrypt|argon2|passwordHash)\b", text):
+        return []
+    if not re.search(r"(?i)(setSession|cookies\(\)\.set|SignJWT|jwt|session)", text):
+        return []
+    if re.search(r"(?i)(checkRateLimit|rateLimit|throttle|limiter|captcha|turnstile|lockout)", text):
+        return []
+
+    auth_match = re.search(r"(?i)(?:export\s+const\s+)?(signIn|signUp|login|register)\b", text)
+    if not auth_match:
+        return []
+
+    line_no = text[: auth_match.start()].count("\n") + 1
+    return [
+        {
+            "file": rel(path, root),
+            "line": str(line_no),
+            "kind": "password-auth-no-rate-limit",
+            "message": "Password auth flow has no visible rate limit, CAPTCHA, throttle, or lockout; verify credential stuffing and signup abuse controls before launch.",
+            "signal": auth_match.group(0),
         }
     ]
 
