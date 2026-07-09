@@ -284,6 +284,7 @@ def find_risky_code_signals(root: Path) -> list[dict[str, str]]:
         hits.extend(find_auth_callback_origin_redirect_signals(path, root, text))
         hits.extend(find_auth_fail_open_rate_limit_signals(path, root, text))
         hits.extend(find_guest_auth_without_rate_limit_signals(path, root, text))
+        hits.extend(find_nextauth_credentials_without_rate_limit_signals(path, root, text))
         hits.extend(find_password_auth_without_rate_limit_signals(path, root, text))
     return hits[:100]
 
@@ -490,6 +491,43 @@ def find_guest_auth_without_rate_limit_signals(path: Path, root: Path, text: str
             "signal": guest_id_match.group(0),
         }
     ]
+
+
+def find_nextauth_credentials_without_rate_limit_signals(path: Path, root: Path, text: str) -> list[dict[str, str]]:
+    if "Credentials(" not in text:
+        return []
+    if not re.search(r"(?i)from\s+['\"]next-auth/providers/credentials['\"]", text):
+        return []
+
+    hits = []
+    for provider_match in re.finditer(r"Credentials\s*\(\s*{", text):
+        block_end = text.find("}),", provider_match.start())
+        if block_end == -1:
+            block_end = min(len(text), provider_match.start() + 2500)
+        provider_block = text[provider_match.start():block_end]
+
+        if re.search(r"id\s*:\s*['\"]guest['\"]", provider_block):
+            continue
+        if not re.search(r"async\s+authorize\s*\([^)]*\)", provider_block):
+            continue
+        if not re.search(r"(?i)(password|passcode)", provider_block):
+            continue
+        if not re.search(r"\b(compare|bcrypt|argon2|passwordHash|DUMMY_PASSWORD)\b", provider_block):
+            continue
+        if re.search(r"(?i)(checkRateLimit|rateLimit|throttle|limiter|captcha|turnstile|lockout)", provider_block):
+            continue
+
+        line_no = text[: provider_match.start()].count("\n") + 1
+        hits.append(
+            {
+                "file": rel(path, root),
+                "line": str(line_no),
+                "kind": "nextauth-credentials-no-rate-limit",
+                "message": "NextAuth password Credentials provider has no visible rate limit, CAPTCHA, throttle, or lockout; verify credential-stuffing controls before launch.",
+                "signal": "Credentials(",
+            }
+        )
+    return hits
 
 
 def find_password_auth_without_rate_limit_signals(path: Path, root: Path, text: str) -> list[dict[str, str]]:

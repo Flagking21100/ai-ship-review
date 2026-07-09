@@ -774,3 +774,44 @@ Decision: The starter is useful production scaffolding, but password auth entry 
 ### Scanner Improvements Made
 
 - Added `password-auth-no-rate-limit` for auth-like password flows that hash or compare passwords, issue a session, and lack visible rate limiting, throttling, CAPTCHA, or lockout terms nearby.
+
+## Case 19: vercel/ai-chatbot (NextAuth credentials abuse-control follow-up)
+
+Repository: https://github.com/vercel/ai-chatbot
+
+Local test method: partial local snapshot reconstructed from inspected public files because network-restricted shell access prevented cloning.
+
+Type: Next.js AI chatbot starter with NextAuth credentials, guest accounts, Postgres persistence, Redis-backed chat throttling, and public blob uploads
+
+### Ship Decision
+
+```text
+Ship Readiness: Ready with caution
+Score: 71 / 100
+Decision: The chat API has useful rate limits, but password and guest auth entry points still need explicit abuse controls before broad public launch.
+```
+
+### What AI Ship Review Caught Well
+
+- `app/(chat)/api/chat/route.ts` still requires a session, checks chat ownership, applies IP rate limits, and enforces per-user message limits before returning model work.
+- The scanner already catches the guest-account provider that calls `createGuestUser()` without visible throttling and the upload route that stores files with `access: "public"`.
+- `.env.example` uses masked values for secrets such as `AUTH_SECRET`, `AI_GATEWAY_API_KEY`, `BLOB_READ_WRITE_TOKEN`, `POSTGRES_URL`, and `REDIS_URL`, so it does not teach copy-pasteable weak secret defaults.
+
+### Main Launch Risks
+
+- `app/(auth)/auth.ts` contains a regular NextAuth `Credentials` provider that reads email/password, compares passwords with `bcrypt-ts`, and returns the user without visible rate limiting, CAPTCHA, lockout, or equivalent abuse control in the provider path.
+- The same file also contains the previously noted guest provider that creates durable guest users without visible throttling, so both anonymous account creation and credential stuffing remain launch-readiness concerns.
+- The partial snapshot has a Playwright test script in `package.json`, but no local test files or CI workflow files were present in the reconstructed snapshot, so automated release confidence could not be verified from this case alone.
+
+### False Positives
+
+- The existing `guest-auth-no-rate-limit` signal is separate from the regular credentials provider risk. It should not be treated as covering password auth just because both live in the same NextAuth file.
+
+### Missed Or Weak Signals
+
+- Before this run, `password-auth-no-rate-limit` caught server-action style password flows, but missed NextAuth `Credentials` providers because session issuance is implicit in the framework rather than visible as `setSession(...)` or JWT code.
+- The scanner still cannot prove whether rate limits are enforced externally at middleware, CDN, or WAF layers; reviewers must ask for that evidence manually.
+
+### Scanner Improvements Made
+
+- Added `nextauth-credentials-no-rate-limit` for non-guest NextAuth password `Credentials` providers that compare passwords without visible rate limiting, throttling, CAPTCHA, or lockout terms nearby.
