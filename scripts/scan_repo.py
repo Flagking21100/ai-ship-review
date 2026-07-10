@@ -286,6 +286,7 @@ def find_risky_code_signals(root: Path) -> list[dict[str, str]]:
         hits.extend(find_guest_auth_without_rate_limit_signals(path, root, text))
         hits.extend(find_nextauth_credentials_without_rate_limit_signals(path, root, text))
         hits.extend(find_password_auth_without_rate_limit_signals(path, root, text))
+        hits.extend(find_storage_delete_noop_signals(path, root, text))
     return hits[:100]
 
 
@@ -554,6 +555,39 @@ def find_password_auth_without_rate_limit_signals(path: Path, root: Path, text: 
             "signal": auth_match.group(0),
         }
     ]
+
+
+def find_storage_delete_noop_signals(path: Path, root: Path, text: str) -> list[dict[str, str]]:
+    relative_path = rel(path, root).lower()
+    if not re.search(r"(?i)(s3|blob|storage|upload|file)", relative_path):
+        return []
+
+    hits = []
+    for match in EXPORTED_ASYNC_OPERATION_PATTERN.finditer(text):
+        name = match.group("name")
+        params = match.group("params")
+        body = match.group("body")
+        combined = f"{params}\n{body}"
+        if not re.search(r"(?i)(delete|remove|destroy)", name):
+            continue
+        if not re.search(r"(?i)(s3|blob|storage|bucket|object|key|file)", combined):
+            continue
+        if re.search(r"(?i)(DeleteObjectCommand|deleteObject|removeObject|del\s*\(|unlink\s*\(|rm\s*\(|destroy\s*\(|\.delete\s*\(|\.remove\s*\(|client\.send\s*\()", body):
+            continue
+        if not re.search(r"(?i)return\s+(?:await\s+)?(?:args?\.)?(?:s3Key|key|fileKey|blobKey|path|id)\s*;?", body):
+            continue
+
+        line_no = text[: match.start()].count("\n") + 1
+        hits.append(
+            {
+                "file": rel(path, root),
+                "line": str(line_no),
+                "kind": "storage-delete-noop",
+                "message": "Storage delete helper appears to be a no-op; verify object cleanup actually deletes the backing file and does not only remove metadata.",
+                "signal": name,
+            }
+        )
+    return hits
 
 
 def find_env_template_risks(root: Path) -> list[dict[str, str]]:

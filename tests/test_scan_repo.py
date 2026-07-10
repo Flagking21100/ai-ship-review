@@ -639,6 +639,40 @@ def test_scan_repo_detects_password_auth_without_rate_limit(tmp_path: Path) -> N
     assert flagged[0]["signal"] == "signIn"
 
 
+def test_scan_repo_detects_storage_delete_noop(tmp_path: Path) -> None:
+    repo = tmp_path / "sample"
+    repo.mkdir()
+    (repo / "s3Utils.ts").write_text(
+        "\n".join(
+            [
+                "export const deleteFileFromS3 = async ({ s3Key }) => {",
+                "  return s3Key;",
+                "};",
+                "",
+                "export const deleteFileFromS3Safely = async ({ s3Key }) => {",
+                "  const command = new DeleteObjectCommand({ Key: s3Key });",
+                "  return await s3Client.send(command);",
+                "};",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    script = Path(__file__).resolve().parents[1] / "scripts" / "scan_repo.py"
+    completed = subprocess.run(
+        [sys.executable, str(script), str(repo), "--json"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    data = json.loads(completed.stdout)
+    flagged = [hit for hit in data["risky_code_signals"] if hit["kind"] == "storage-delete-noop"]
+    assert len(flagged) == 1
+    assert flagged[0]["file"] == "s3Utils.ts"
+    assert flagged[0]["signal"] == "deleteFileFromS3"
+
+
 def test_scan_repo_reports_missing_tests_and_ci(tmp_path: Path) -> None:
     repo = tmp_path / "sample"
     repo.mkdir()

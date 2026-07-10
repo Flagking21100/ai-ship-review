@@ -815,3 +815,43 @@ Decision: The chat API has useful rate limits, but password and guest auth entry
 ### Scanner Improvements Made
 
 - Added `nextauth-credentials-no-rate-limit` for non-guest NextAuth password `Credentials` providers that compare passwords without visible rate limiting, throttling, CAPTCHA, or lockout terms nearby.
+
+## Case 20: wasp-lang/open-saas (storage delete follow-up)
+
+Repository: https://github.com/wasp-lang/open-saas
+
+Local test method: partial local snapshot reconstructed from inspected public files because network-restricted shell access prevented cloning.
+
+Type: Wasp SaaS template with auth, payments, AI demo, S3 uploads, and deployment tooling
+
+### Ship Decision
+
+```text
+Ship Readiness: Ready with caution
+Score: 66 / 100
+Decision: Useful template breadth, but the inspected file-management path should not ship unchanged because object deletion appears incomplete in both access control and cleanup behavior.
+```
+
+### What AI Ship Review Caught Well
+
+- The scanner continued to surface the previously confirmed `signed-download-no-auth` issue in `template/app/src/file-upload/operations.ts`, where signed download URLs are returned from raw `s3Key` input without visible auth or ownership checks.
+- The scanner also continued to surface `file-key-claim-no-ownership` on `addFileToDb`, which still accepts a caller-supplied `s3Key` after only an existence check.
+- Manual review showed the delete path is easy to trace end-to-end: `deleteFile` removes the DB row for the current user and then calls `deleteFileFromS3({ s3Key: deletedFile.s3Key })`.
+
+### Main Launch Risks
+
+- `template/app/src/file-upload/s3Utils.ts` exports `deleteFileFromS3` as an async helper that only `return`s `s3Key` and never issues an S3 delete command. That means the inspected delete flow appears to delete metadata while leaving the backing object behind.
+- Because `template/app/src/file-upload/operations.ts` catches errors around `deleteFileFromS3` and logs an "Orphaned file" message, the intended behavior is clearly real object cleanup. In the inspected snapshot, that intended cleanup is not implemented.
+- Combined with the earlier signed-download and file-key ownership issues, leftover objects can become a more meaningful retention and exposure risk rather than just storage-cost drift.
+
+### False Positives
+
+- None from this follow-up. The new storage-delete rule stayed narrow by requiring a storage-oriented delete helper name plus a body that returns the key/path directly and lacks obvious delete primitives.
+
+### Missed Or Weak Signals
+
+- Before this run, the scanner did not flag storage-delete helpers that look implemented from the call site but are effectively no-ops in the helper body.
+
+### Scanner Improvements Made
+
+- Added `storage-delete-noop` for exported storage deletion helpers that are named like real object cleanup paths but only return the supplied key/path instead of invoking a delete primitive.
