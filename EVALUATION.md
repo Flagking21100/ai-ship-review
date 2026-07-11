@@ -855,3 +855,44 @@ Decision: Useful template breadth, but the inspected file-management path should
 ### Scanner Improvements Made
 
 - Added `storage-delete-noop` for exported storage deletion helpers that are named like real object cleanup paths but only return the supplied key/path instead of invoking a delete primitive.
+
+## Case 21: dubinc/dub (hardcoded URL precision follow-up)
+
+Repository: https://github.com/dubinc/dub
+
+Local test method: partial local snapshot reconstructed from inspected public files because network-restricted shell access prevented cloning.
+
+Type: Next.js link-management SaaS with storage uploads, SMTP auth, Stripe billing, and deployment-oriented local infrastructure
+
+### Ship Decision
+
+```text
+Ship Readiness: Ready with caution
+Score: 74 / 100
+Decision: The inspected snapshot looks broadly production-minded, but reviewers still need to verify local-only database shortcuts stay out of shared environments and not overreact to benign URL constants.
+```
+
+### What AI Ship Review Caught Well
+
+- The scanner still surfaced `compose-empty-db-password` in `apps/web/docker-compose.yml`, and manual review confirms the file explicitly says it is for local development only while still being worth a launch-readiness check for copy-paste drift.
+- `apps/web/.env.example` still contains `SMTP_PASSWORD=smtpPassword`, which is a reasonable weak-placeholder warning for an auth-adjacent credential even in a template.
+- Manual inspection of `apps/web/lib/storage.ts` showed care around remote fetch safety: `assertSafeUrl` rejects non-HTTP(S) schemes and private/internal IP ranges before direct fetches.
+
+### Main Launch Risks
+
+- The inspected local infrastructure still enables `MYSQL_ALLOW_EMPTY_PASSWORD: "yes"` in `apps/web/docker-compose.yml`. Even with the local-only warning comment, teams can accidentally reuse these shortcuts in shared preview or ad hoc environments.
+- The partial snapshot did not include enough auth, billing, or upload route coverage to prove tenant isolation, webhook verification, or storage-access control end to end.
+
+### False Positives
+
+- `apps/web/lib/storage.ts` previously triggered `hardcoded-url` on `const proxyUrl = new URL("https://wsrv.nl");`, but this is a fixed third-party image proxy constant inside a helper that already performs SSRF-style checks before direct fetch fallbacks.
+- The same broad pattern also treats env-fallback config like `process.env.MIDDAY_API_URL || "https://api.midday.ai"` as suspicious even when it is just a default service endpoint.
+
+### Missed Or Weak Signals
+
+- Before this run, the scanner could not distinguish between genuinely embedded external destinations and configuration-style defaults or constructor-only service constants, so `hardcoded-url` noise made the result set less reviewable.
+- The scanner still does not evaluate whether a test file is only a placeholder, so sparse test trees can look healthier than they are.
+
+### Scanner Improvements Made
+
+- Tightened `hardcoded-url` to ignore env-fallback default endpoints and `new URL("https://...")` constructor-only service constants while still flagging direct embedded URLs.

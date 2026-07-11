@@ -69,6 +69,34 @@ def test_scan_repo_reports_risky_code_signals(tmp_path: Path) -> None:
     assert "hardcoded-url" in kinds
 
 
+def test_scan_repo_ignores_config_style_hardcoded_urls(tmp_path: Path) -> None:
+    repo = tmp_path / "sample"
+    repo.mkdir()
+    (repo / "storage.ts").write_text(
+        "\n".join(
+            [
+                'const apiUrl = process.env.MIDDAY_API_URL || "https://api.midday.ai";',
+                'const proxyUrl = new URL("https://wsrv.nl");',
+                'const accountUrl = "https://demo.example.com/account";',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    script = Path(__file__).resolve().parents[1] / "scripts" / "scan_repo.py"
+    completed = subprocess.run(
+        [sys.executable, str(script), str(repo), "--json"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    data = json.loads(completed.stdout)
+    hardcoded_hits = [hit for hit in data["risky_code_signals"] if hit["kind"] == "hardcoded-url"]
+    assert len(hardcoded_hits) == 1
+    assert hardcoded_hits[0]["signal"] == 'const accountUrl = "https://demo.example.com/account";'
+
+
 def test_scan_repo_detects_signed_download_without_auth_and_avoids_helper_return_true_noise(tmp_path: Path) -> None:
     repo = tmp_path / "sample"
     repo.mkdir()

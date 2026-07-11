@@ -259,6 +259,11 @@ def find_risky_code_signals(root: Path) -> list[dict[str, str]]:
                     or "src=" in stripped_line
                 ):
                     continue
+                if kind == "hardcoded-url" and (
+                    ("process.env." in stripped_line and ("||" in stripped_line or "??" in stripped_line))
+                    or re.search(r"\bnew\s+URL\s*\(\s*['\"]https?://", stripped_line)
+                ):
+                    continue
                 if kind == "unconditional-allow":
                     context_start = max(0, line_no - 3)
                     context_end = min(len(lines), line_no + 2)
