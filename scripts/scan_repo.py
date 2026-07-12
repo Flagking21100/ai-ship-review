@@ -161,6 +161,14 @@ REQUEST_ORIGIN_REDIRECT_PATTERN = re.compile(
 
 REDIRECT_CALL_PATTERN = re.compile(r"(?i)(redirect\s*\(|NextResponse\.redirect\s*\()")
 
+URL_QUERY_PARAM_ASSIGNMENT_PATTERN = re.compile(
+    r"(?:const|let)\s+(?P<name>\w+)\s*=\s*searchParams\.get\(['\"](?:url|target|redirect|redirectTo|href|imageUrl|image)['\"]\)"
+)
+
+SAFE_URL_VALIDATION_PATTERN = re.compile(
+    r"(?i)(assertSafeUrl|isSafeUrl|allowlist|allowList|allowedHosts|ALLOWED_HOSTS|hostname|protocol\s*[!=]==?\s*['\"]https?:)"
+)
+
 INSECURE_COMPOSE_PATTERNS = [
     (
         "compose-empty-db-password",
@@ -292,6 +300,7 @@ def find_risky_code_signals(root: Path) -> list[dict[str, str]]:
         hits.extend(find_nextauth_credentials_without_rate_limit_signals(path, root, text))
         hits.extend(find_password_auth_without_rate_limit_signals(path, root, text))
         hits.extend(find_storage_delete_noop_signals(path, root, text))
+        hits.extend(find_server_fetch_user_url_signals(path, root, text))
     return hits[:100]
 
 
@@ -590,6 +599,37 @@ def find_storage_delete_noop_signals(path: Path, root: Path, text: str) -> list[
                 "kind": "storage-delete-noop",
                 "message": "Storage delete helper appears to be a no-op; verify object cleanup actually deletes the backing file and does not only remove metadata.",
                 "signal": name,
+            }
+        )
+    return hits
+
+
+def find_server_fetch_user_url_signals(path: Path, root: Path, text: str) -> list[dict[str, str]]:
+    if "searchParams.get(" not in text or "fetch(" not in text:
+        return []
+    if SAFE_URL_VALIDATION_PATTERN.search(text):
+        return []
+
+    hits = []
+    for match in URL_QUERY_PARAM_ASSIGNMENT_PATTERN.finditer(text):
+        var_name = match.group("name")
+        fetch_match = re.search(rf"\bfetch\s*\(\s*{re.escape(var_name)}\s*[),]", text[match.end():])
+        if not fetch_match:
+            continue
+
+        line_no = text[: match.end() + fetch_match.start()].count("\n") + 1
+        message = "Route server-fetches a caller-controlled URL without visible allowlist or protocol validation; verify SSRF protections."
+        redirect_match = re.search(rf"NextResponse\.redirect\s*\(\s*{re.escape(var_name)}\s*\)", text[match.end():])
+        if redirect_match:
+            message = "Route server-fetches a caller-controlled URL and redirects to it on fallback without visible allowlist or protocol validation; verify SSRF and open-redirect protections."
+
+        hits.append(
+            {
+                "file": rel(path, root),
+                "line": str(line_no),
+                "kind": "server-fetch-user-url",
+                "message": message,
+                "signal": f"fetch({var_name})",
             }
         )
     return hits

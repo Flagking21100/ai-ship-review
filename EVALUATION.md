@@ -896,3 +896,45 @@ Decision: The inspected snapshot looks broadly production-minded, but reviewers 
 ### Scanner Improvements Made
 
 - Tightened `hardcoded-url` to ignore env-fallback default endpoints and `new URL("https://...")` constructor-only service constants while still flagging direct embedded URLs.
+
+## Case 22: SamurAIGPT/ai-character-studio (download proxy SSRF follow-up)
+
+Repository: https://github.com/SamurAIGPT/ai-character-studio
+
+Local test method: shallow local clone via public GitHub snapshot and targeted manual inspection of auth, generation, billing, upload/download, and export routes.
+
+Type: Next.js AI character/chat SaaS starter with Google auth, Stripe billing, upload/download helpers, and one-click export/deployment automation
+
+### Ship Decision
+
+```text
+Ship Readiness: Not ready
+Score: 59 / 100
+Decision: Do not launch this snapshot broadly without fixing the unauthenticated download proxy and reviewing the export flow's shared deployment credentials.
+```
+
+### What AI Ship Review Caught Well
+
+- The scanner correctly highlighted the repo's thin release hygiene boundary: no test files and no CI workflow files were present in the cloned snapshot.
+- Manual review confirmed the billing webhook path is at least structured around Stripe signature verification through `stripe.webhooks.constructEvent(...)`, so the highest-risk billing issue was not in the obvious webhook entry point.
+- The scanner's env-template checks remained useful and low-noise here: `.env.example` contains placeholder secrets, but not copy-pasteable live values.
+
+### Main Launch Risks
+
+- `src/app/api/download/route.js` reads `url` from the query string, calls `fetch(imageUrl)` server-side, and falls back to `NextResponse.redirect(imageUrl)` with no visible host allowlist or protocol validation. That creates an SSRF-shaped download proxy and an open-redirect fallback on a route used by the gallery and template download buttons.
+- `src/app/api/generation/route.js` accepts `modelEndpoint` from the request body when `appId` is absent, and `src/lib/services/ai.js` will POST to any `http(s)` endpoint while attaching the configured `x-api-key` header. Reviewers should treat that as a second high-risk boundary because a signed-in user may be able to redirect server-side requests and leak the upstream AI key to an attacker-controlled host.
+- `src/app/api/app-instances/export/route.js` uses server-owned `GITHUB_TOKEN` and optional `VERCEL_TOKEN` to create public repositories and deployments after only local app ownership checks. In a multi-user deployment, that means ordinary signed-in users may be able to consume shared platform credentials and publish assets under the operator's GitHub/Vercel accounts unless tighter entitlement controls exist elsewhere.
+
+### False Positives
+
+- `hardcoded-url` is noisy on this repo's integration-heavy paths. GitHub API, Vercel API, and MuAPI endpoints in `src/app/api/app-instances/export/route.js`, `src/app/api/chat/route.js`, `src/app/api/upload/route.js`, and `src/lib/services/ai.js` are mostly normal service endpoints rather than standalone launch blockers.
+- I did not change that heuristic in this run because the stronger scanner gap was the missing SSRF-style signal, and broad URL suppression would risk hiding real embedded destinations.
+
+### Missed Or Weak Signals
+
+- Before this run, the scanner missed request-parameter download proxies that server-fetch a caller-controlled URL without visible validation and then redirect to the same untrusted URL on failure.
+- The scanner still does not reason about shared operator credentials used in product features like GitHub/Vercel export flows, so that class remains a manual review boundary.
+
+### Scanner Improvements Made
+
+- Added `server-fetch-user-url` for routes that read a URL-like query parameter and pass it directly to server-side `fetch()` without visible allowlist or protocol validation, with stronger messaging when the same value is also used in a redirect fallback.

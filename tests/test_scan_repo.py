@@ -701,6 +701,59 @@ def test_scan_repo_detects_storage_delete_noop(tmp_path: Path) -> None:
     assert flagged[0]["signal"] == "deleteFileFromS3"
 
 
+def test_scan_repo_detects_server_fetch_user_url_without_validation(tmp_path: Path) -> None:
+    repo = tmp_path / "sample"
+    repo.mkdir()
+    (repo / "route.ts").write_text(
+        "\n".join(
+            [
+                "import { NextResponse } from 'next/server';",
+                "export async function GET(req) {",
+                "  const { searchParams } = new URL(req.url);",
+                "  const imageUrl = searchParams.get('url');",
+                "  const res = await fetch(imageUrl);",
+                "  if (!res.ok) return NextResponse.redirect(imageUrl);",
+                "  return NextResponse.json({ ok: true });",
+                "}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (repo / "safe_route.ts").write_text(
+        "\n".join(
+            [
+                "import { NextResponse } from 'next/server';",
+                "const ALLOWED_HOSTS = ['cdn.example.com'];",
+                "export async function GET(req) {",
+                "  const { searchParams } = new URL(req.url);",
+                "  const imageUrl = searchParams.get('url');",
+                "  const parsed = new URL(imageUrl);",
+                "  if (parsed.protocol !== 'https:' || !ALLOWED_HOSTS.includes(parsed.hostname)) {",
+                "    return NextResponse.json({ error: 'blocked' }, { status: 400 });",
+                "  }",
+                "  const res = await fetch(imageUrl);",
+                "  return NextResponse.json({ ok: res.ok });",
+                "}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    script = Path(__file__).resolve().parents[1] / "scripts" / "scan_repo.py"
+    completed = subprocess.run(
+        [sys.executable, str(script), str(repo), "--json"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    data = json.loads(completed.stdout)
+    flagged = [hit for hit in data["risky_code_signals"] if hit["kind"] == "server-fetch-user-url"]
+    assert len(flagged) == 1
+    assert flagged[0]["file"] == "route.ts"
+    assert flagged[0]["signal"] == "fetch(imageUrl)"
+
+
 def test_scan_repo_reports_missing_tests_and_ci(tmp_path: Path) -> None:
     repo = tmp_path / "sample"
     repo.mkdir()
