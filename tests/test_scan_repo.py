@@ -754,6 +754,58 @@ def test_scan_repo_detects_server_fetch_user_url_without_validation(tmp_path: Pa
     assert flagged[0]["signal"] == "fetch(imageUrl)"
 
 
+def test_scan_repo_detects_stripe_checkout_session_rebind(tmp_path: Path) -> None:
+    repo = tmp_path / "sample"
+    repo.mkdir()
+    (repo / "route.ts").write_text(
+        "\n".join(
+            [
+                "import { NextRequest } from 'next/server';",
+                "export async function GET(request: NextRequest) {",
+                "  const searchParams = request.nextUrl.searchParams;",
+                "  const sessionId = searchParams.get('session_id');",
+                "  const session = await stripe.checkout.sessions.retrieve(sessionId);",
+                "  const userId = session.client_reference_id;",
+                "  const user = await db.query.users.findFirst({ where: eq(users.id, Number(userId)) });",
+                "  await setSession(user);",
+                "}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (repo / "safe_route.ts").write_text(
+        "\n".join(
+            [
+                "import { NextRequest } from 'next/server';",
+                "export async function GET(request: NextRequest) {",
+                "  const currentUser = await getUser();",
+                "  const searchParams = request.nextUrl.searchParams;",
+                "  const sessionId = searchParams.get('session_id');",
+                "  const session = await stripe.checkout.sessions.retrieve(sessionId);",
+                "  const userId = session.client_reference_id;",
+                "  if (currentUser.id !== Number(userId)) throw new Error('forbidden');",
+                "  await setSession(currentUser);",
+                "}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    script = Path(__file__).resolve().parents[1] / "scripts" / "scan_repo.py"
+    completed = subprocess.run(
+        [sys.executable, str(script), str(repo), "--json"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    data = json.loads(completed.stdout)
+    flagged = [hit for hit in data["risky_code_signals"] if hit["kind"] == "stripe-checkout-session-rebind"]
+    assert len(flagged) == 1
+    assert flagged[0]["file"] == "route.ts"
+    assert flagged[0]["signal"] == "session_id -> client_reference_id -> setSession"
+
+
 def test_scan_repo_reports_missing_tests_and_ci(tmp_path: Path) -> None:
     repo = tmp_path / "sample"
     repo.mkdir()

@@ -938,3 +938,44 @@ Decision: Do not launch this snapshot broadly without fixing the unauthenticated
 ### Scanner Improvements Made
 
 - Added `server-fetch-user-url` for routes that read a URL-like query parameter and pass it directly to server-side `fetch()` without visible allowlist or protocol validation, with stronger messaging when the same value is also used in a redirect fallback.
+
+## Case 23: nextjs/saas-starter (Stripe checkout session rebind follow-up)
+
+Repository: https://github.com/nextjs/saas-starter
+
+Local test commit: `6e33e58`
+
+Type: Official Next.js SaaS starter with email/password auth, Stripe billing, Postgres, and Vercel-oriented deployment guidance
+
+### Ship Decision
+
+```text
+Ship Readiness: Ready with caution
+Score: 68 / 100
+Decision: Useful starter for learning and internal prototyping, but I would not launch it unchanged before adding auth abuse controls and hardening the Stripe success callback session binding.
+```
+
+### What AI Ship Review Caught Well
+
+- The scanner correctly flagged `app/(login)/actions.ts` for password auth without visible rate limiting, CAPTCHA, or lockout controls.
+- The scanner also caught `lib/db/seed.ts` shipping a predictable owner seed account (`test@test.com` / `admin123`), which is acceptable for local setup but risky if copied into shared environments.
+- Manual review confirmed `app/api/stripe/webhook/route.ts` uses `stripe.webhooks.constructEvent(...)`, so webhook signature verification is present in the obvious subscription-change path.
+
+### Main Launch Risks
+
+- `app/api/stripe/checkout/route.ts` accepts `session_id` from the query string, retrieves the Stripe Checkout session, reads `session.client_reference_id`, loads that user from the database, and then calls `setSession(user[0])`. There is no evident check that the current browser session already belongs to that same user. If a valid checkout session ID for another user is exposed, this callback can rebind the browser into the other account.
+- `app/(login)/actions.ts` provides both sign-in and direct sign-up with only password length checks. The reviewed path did not show rate limiting, lockout, CAPTCHA, or email verification, so credential stuffing and signup abuse remain launch concerns.
+- The inspected snapshot has no automated tests and no CI workflow files, which raises the odds that auth, billing, and team-management regressions reach production unnoticed.
+
+### False Positives
+
+- `hardcoded-url` is noisy here on instructional links inside `lib/db/setup.ts` and on the GitHub clone command rendered in `app/(dashboard)/terminal.tsx`; those strings are documentation or demo content, not launch blockers.
+- `secret_signals` also matched the enum member `UPDATE_PASSWORD` in `lib/db/schema.ts`, which is clearly not a credential.
+
+### Missed Or Weak Signals
+
+- Before this run, the scanner did not recognize payment success callbacks that recreate an auth session from third-party checkout state without an evident current-user binding check.
+
+### Scanner Improvements Made
+
+- Added `stripe-checkout-session-rebind` for Stripe success handlers that take `session_id` from the request, read `client_reference_id` from the Checkout session, and establish a local session without an evident current-user binding check.

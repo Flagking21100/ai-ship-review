@@ -169,6 +169,27 @@ SAFE_URL_VALIDATION_PATTERN = re.compile(
     r"(?i)(assertSafeUrl|isSafeUrl|allowlist|allowList|allowedHosts|ALLOWED_HOSTS|hostname|protocol\s*[!=]==?\s*['\"]https?:)"
 )
 
+STRIPE_CHECKOUT_SESSION_ID_PATTERN = re.compile(
+    r"searchParams\.get\(['\"]session_id['\"]\)"
+)
+
+STRIPE_CHECKOUT_RETRIEVE_PATTERN = re.compile(
+    r"stripe\.checkout\.sessions\.retrieve\s*\("
+)
+
+STRIPE_CLIENT_REFERENCE_PATTERN = re.compile(
+    r"client_reference_id"
+)
+
+SESSION_SETTER_PATTERN = re.compile(
+    r"(?i)(setSession\s*\(|cookies\(\)\.set\s*\()"
+)
+
+CURRENT_USER_BINDING_PATTERN = re.compile(
+    r"(?is)(?:const\s+\w+\s*=\s*await\s+getUser\s*\(\s*\)|await\s+getUser\s*\(\s*\)).{0,400}"
+    r"(?:client_reference_id|userId).{0,120}(===|!==|!=|==)"
+)
+
 INSECURE_COMPOSE_PATTERNS = [
     (
         "compose-empty-db-password",
@@ -301,6 +322,7 @@ def find_risky_code_signals(root: Path) -> list[dict[str, str]]:
         hits.extend(find_password_auth_without_rate_limit_signals(path, root, text))
         hits.extend(find_storage_delete_noop_signals(path, root, text))
         hits.extend(find_server_fetch_user_url_signals(path, root, text))
+        hits.extend(find_stripe_checkout_session_rebind_signals(path, root, text))
     return hits[:100]
 
 
@@ -633,6 +655,31 @@ def find_server_fetch_user_url_signals(path: Path, root: Path, text: str) -> lis
             }
         )
     return hits
+
+
+def find_stripe_checkout_session_rebind_signals(path: Path, root: Path, text: str) -> list[dict[str, str]]:
+    if not STRIPE_CHECKOUT_SESSION_ID_PATTERN.search(text):
+        return []
+    if not STRIPE_CHECKOUT_RETRIEVE_PATTERN.search(text):
+        return []
+    if not STRIPE_CLIENT_REFERENCE_PATTERN.search(text):
+        return []
+    if not SESSION_SETTER_PATTERN.search(text):
+        return []
+    if CURRENT_USER_BINDING_PATTERN.search(text):
+        return []
+
+    match = STRIPE_CHECKOUT_SESSION_ID_PATTERN.search(text)
+    line_no = text[: match.start()].count("\n") + 1
+    return [
+        {
+            "file": rel(path, root),
+            "line": str(line_no),
+            "kind": "stripe-checkout-session-rebind",
+            "message": "Stripe checkout success flow recreates a login session from a query-supplied session ID and Stripe client reference without an evident current-user binding check; verify this callback cannot sign a browser into another account.",
+            "signal": "session_id -> client_reference_id -> setSession",
+        }
+    ]
 
 
 def find_env_template_risks(root: Path) -> list[dict[str, str]]:
