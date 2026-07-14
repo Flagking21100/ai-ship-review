@@ -806,6 +806,61 @@ def test_scan_repo_detects_stripe_checkout_session_rebind(tmp_path: Path) -> Non
     assert flagged[0]["signal"] == "session_id -> client_reference_id -> setSession"
 
 
+def test_scan_repo_detects_stripe_portal_customer_param_without_binding_check(tmp_path: Path) -> None:
+    repo = tmp_path / "sample"
+    repo.mkdir()
+    (repo / "portal.ts").write_text(
+        "\n".join(
+            [
+                '"use server";',
+                "export async function openCustomerPortal(userStripeId: string) {",
+                "  const session = await auth();",
+                "  if (!session?.user?.email) throw new Error('Unauthorized');",
+                "  const stripeSession = await stripe.billingPortal.sessions.create({",
+                "    customer: userStripeId,",
+                "    return_url: billingUrl,",
+                "  });",
+                "  return stripeSession.url;",
+                "}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (repo / "safe_portal.ts").write_text(
+        "\n".join(
+            [
+                '"use server";',
+                "export async function openCustomerPortalSafely(userStripeId: string) {",
+                "  const session = await auth();",
+                "  if (!session?.user?.id) throw new Error('Unauthorized');",
+                "  const subscriptionPlan = await getUserSubscriptionPlan(session.user.id);",
+                "  if (subscriptionPlan.stripeCustomerId !== userStripeId) throw new Error('Forbidden');",
+                "  const stripeSession = await stripe.billingPortal.sessions.create({",
+                "    customer: userStripeId,",
+                "    return_url: billingUrl,",
+                "  });",
+                "  return stripeSession.url;",
+                "}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    script = Path(__file__).resolve().parents[1] / "scripts" / "scan_repo.py"
+    completed = subprocess.run(
+        [sys.executable, str(script), str(repo), "--json"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    data = json.loads(completed.stdout)
+    flagged = [hit for hit in data["risky_code_signals"] if hit["kind"] == "stripe-portal-customer-param"]
+    assert len(flagged) == 1
+    assert flagged[0]["file"] == "portal.ts"
+    assert flagged[0]["signal"] == "openCustomerPortal -> customer: userStripeId"
+
+
 def test_scan_repo_reports_missing_tests_and_ci(tmp_path: Path) -> None:
     repo = tmp_path / "sample"
     repo.mkdir()

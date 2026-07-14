@@ -323,6 +323,7 @@ def find_risky_code_signals(root: Path) -> list[dict[str, str]]:
         hits.extend(find_storage_delete_noop_signals(path, root, text))
         hits.extend(find_server_fetch_user_url_signals(path, root, text))
         hits.extend(find_stripe_checkout_session_rebind_signals(path, root, text))
+        hits.extend(find_stripe_portal_customer_param_signals(path, root, text))
     return hits[:100]
 
 
@@ -680,6 +681,53 @@ def find_stripe_checkout_session_rebind_signals(path: Path, root: Path, text: st
             "signal": "session_id -> client_reference_id -> setSession",
         }
     ]
+
+
+def find_stripe_portal_customer_param_signals(path: Path, root: Path, text: str) -> list[dict[str, str]]:
+    if "stripe.billingPortal.sessions.create" not in text:
+        return []
+
+    direct_param_patterns = [
+        re.compile(
+            r"export\s+async\s+function\s+(?P<name>\w+)\s*\([^)]*(?P<param>userStripeId|stripeCustomerId|customerId)[^)]*\)"
+            r"(?P<body>.{0,2500}?stripe\.billingPortal\.sessions\.create\s*\(\s*{.{0,500}?customer\s*:\s*(?P=param)\b)",
+            re.DOTALL,
+        ),
+        re.compile(
+            r"export\s+const\s+(?P<name>\w+)\s*=\s*async\s*\([^)]*(?P<param>userStripeId|stripeCustomerId|customerId)[^)]*\)\s*=>"
+            r"(?P<body>.{0,2500}?stripe\.billingPortal\.sessions\.create\s*\(\s*{.{0,500}?customer\s*:\s*(?P=param)\b)",
+            re.DOTALL,
+        ),
+    ]
+
+    safety_patterns = [
+        re.compile(r"getUserSubscriptionPlan\s*\("),
+        re.compile(r"stripeCustomerId\s*(?:===|==|!==|!=)\s*(?:userStripeId|customerId)"),
+        re.compile(r"(?:userStripeId|customerId)\s*(?:===|==|!==|!=)\s*stripeCustomerId"),
+        re.compile(r"subscriptionPlan\.stripeCustomerId"),
+        re.compile(r"dbUser\.stripeCustomerId"),
+    ]
+
+    for pattern in direct_param_patterns:
+        match = pattern.search(text)
+        if not match:
+            continue
+        body = match.group("body")
+        if any(safety.search(body) for safety in safety_patterns):
+            continue
+
+        line_no = text[: match.start()].count("\n") + 1
+        return [
+            {
+                "file": rel(path, root),
+                "line": str(line_no),
+                "kind": "stripe-portal-customer-param",
+                "message": "Stripe billing portal session is created from a client-supplied customer ID; derive the customer from the authenticated user server-side or verify it matches the current account.",
+                "signal": f"{match.group('name')} -> customer: {match.group('param')}",
+            }
+        ]
+
+    return []
 
 
 def find_env_template_risks(root: Path) -> list[dict[str, str]]:

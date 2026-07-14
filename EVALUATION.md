@@ -979,3 +979,43 @@ Decision: Useful starter for learning and internal prototyping, but I would not 
 ### Scanner Improvements Made
 
 - Added `stripe-checkout-session-rebind` for Stripe success handlers that take `session_id` from the request, read `client_reference_id` from the Checkout session, and establish a local session without an evident current-user binding check.
+
+## Case 24: mickasmt/next-saas-stripe-starter (Stripe portal customer binding follow-up)
+
+Repository: https://github.com/mickasmt/next-saas-stripe-starter
+
+Local test commit: `a78d130`
+
+Type: Next.js SaaS starter with Auth.js, Stripe subscriptions, admin roles, email login, and Vercel-oriented setup
+
+### Ship Decision
+
+```text
+Ship Readiness: Ready with caution
+Score: 70 / 100
+Decision: The starter has useful Stripe webhook verification and environment scaffolding, but I would not expose the billing portal flow broadly before binding portal creation strictly to the authenticated user's stored Stripe customer record.
+```
+
+### What AI Ship Review Caught Well
+
+- The scanner correctly noted the absence of automated test files and CI workflow files in the inspected snapshot, which materially lowers launch confidence for billing and auth changes.
+- Manual review confirmed `app/api/webhooks/stripe/route.ts` uses `stripe.webhooks.constructEvent(...)`, so the obvious Stripe webhook signature verification step is present.
+- `.env.example` documents the expected auth, database, email, and Stripe variables with placeholder values rather than copy-pasteable live secrets.
+
+### Main Launch Risks
+
+- `actions/open-customer-portal.ts` accepts `userStripeId` as a server-action argument and passes it directly into `stripe.billingPortal.sessions.create({ customer: userStripeId, ... })` after only checking that a user is signed in. Because server action arguments are client-controlled, a logged-in user may be able to request a portal session for another customer's Stripe ID if they can obtain it.
+- The inspected repo has no automated tests and no CI workflows in the snapshot, so there is no visible release guardrail for auth, billing, or admin regressions.
+- The initial scanner output produced many `hardcoded-url` hits in marketing/config files such as `components/sections/powered.tsx` and `config/landing.ts`. Those are mostly review-noise rather than real launch blockers, so reviewers still need to prioritize higher-signal billing/auth findings manually.
+
+### False Positives
+
+- `hardcoded-url` is still noisy on marketing links, social/profile links, GitHub API reads for star counts, and testimonial avatar/image URLs in UI/config files. This run did not change that heuristic because the stronger value was covering the missed billing-portal trust boundary first.
+
+### Missed Or Weak Signals
+
+- Before this run, the scanner did not flag server actions that accept a Stripe customer identifier from the client and use it directly to create a billing portal session without verifying that the identifier belongs to the authenticated account.
+
+### Scanner Improvements Made
+
+- Added `stripe-portal-customer-param` for server actions that create Stripe billing portal sessions from a client-supplied customer ID without an evident server-side ownership check.
