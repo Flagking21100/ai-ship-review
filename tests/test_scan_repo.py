@@ -428,6 +428,36 @@ def test_scan_repo_detects_openai_sdk_usage_and_implicit_env(tmp_path: Path) -> 
     assert openai_hits[0]["line"] == "1"
 
 
+def test_scan_repo_ignores_enum_style_self_labels_in_secret_scan(tmp_path: Path) -> None:
+    repo = tmp_path / "sample"
+    repo.mkdir()
+    (repo / "schema.ts").write_text(
+        "\n".join(
+            [
+                "export enum ActivityType {",
+                "  UPDATE_PASSWORD = 'UPDATE_PASSWORD',",
+                "  RESET_TOKEN = 'RESET_TOKEN',",
+                "}",
+                "const STRIPE_SECRET = 'this-is-a-realistic-long-secret-value';",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    script = Path(__file__).resolve().parents[1] / "scripts" / "scan_repo.py"
+    completed = subprocess.run(
+        [sys.executable, str(script), str(repo), "--json"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    data = json.loads(completed.stdout)
+    assert len(data["secret_signals"]) == 1
+    assert data["secret_signals"][0]["file"] == "schema.ts"
+    assert "STRIPE_SECRET" in data["secret_signals"][0]["signal"]
+
+
 def test_scan_repo_detects_auth_rate_limit_fail_open(tmp_path: Path) -> None:
     repo = tmp_path / "sample"
     repo.mkdir()

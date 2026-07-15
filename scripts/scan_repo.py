@@ -40,6 +40,10 @@ SECRET_PATTERNS = [
     re.compile(r"(?i)(api[_-]?key|secret|token|password)\s*[:=]\s*['\"][^'\"\n]{12,}['\"]"),
 ]
 
+SELF_LABEL_ASSIGNMENT_PATTERN = re.compile(
+    r"^\s*(?:[A-Za-z_][A-Za-z0-9_]*\s+)?(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*[:=]\s*['\"](?P<value>[A-Za-z0-9_ -]{4,})['\"],?\s*$"
+)
+
 ENV_READ_PATTERNS = [
     re.compile(r"process\.env\.([A-Z0-9_]+)"),
     re.compile(r"os\.environ(?:\.get)?\(['\"]([A-Z0-9_]+)['\"]\)"),
@@ -253,10 +257,21 @@ def find_secret_signals(root: Path) -> list[dict[str, str]]:
             continue
         text = read_text(path)
         for line_no, line in enumerate(text.splitlines(), start=1):
+            if is_self_label_assignment(line):
+                continue
             if any(pattern.search(line) for pattern in SECRET_PATTERNS):
                 hits.append({"file": rel(path, root), "line": str(line_no), "signal": line.strip()[:160]})
                 break
     return hits[:50]
+
+
+def is_self_label_assignment(line: str) -> bool:
+    match = SELF_LABEL_ASSIGNMENT_PATTERN.match(line.strip())
+    if not match:
+        return False
+    name = match.group("name").strip().lower()
+    value = match.group("value").strip().lower().replace(" ", "_").replace("-", "_")
+    return name == value
 
 
 def is_code_file(path: Path) -> bool:

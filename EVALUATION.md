@@ -1019,3 +1019,44 @@ Decision: The starter has useful Stripe webhook verification and environment sca
 ### Scanner Improvements Made
 
 - Added `stripe-portal-customer-param` for server actions that create Stripe billing portal sessions from a client-supplied customer ID without an evident server-side ownership check.
+
+## Case 25: nextjs/saas-starter official snapshot (secret-signal enum false-positive follow-up)
+
+Repository: https://github.com/nextjs/saas-starter
+
+Local test method: targeted manual review of the local `tmp/nextjs-saas-starter-official-snapshot` auth, billing, seed, and schema files plus scanner reruns before and after the precision fix.
+
+Type: Next.js SaaS starter with password auth, Stripe billing, Postgres, and deployment-oriented setup scripts
+
+### Ship Decision
+
+```text
+Ship Readiness: Ready with caution
+Score: 68 / 100
+Decision: The inspected snapshot still has the same meaningful launch risks around password-auth abuse controls and Stripe checkout session binding, but the scanner now avoids overstating severity with a bogus secret hit from enum labels.
+```
+
+### What AI Ship Review Caught Well
+
+- The scanner continued to flag `app/(login)/actions.ts` for password auth without visible rate limiting, CAPTCHA, or lockout controls.
+- The scanner continued to flag `app/api/stripe/checkout/route.ts` for recreating a local session from a query-supplied Stripe Checkout session ID and `client_reference_id` without an evident current-user binding check.
+- The scanner also kept the useful seed-account warning on `lib/db/seed.ts` (`test@test.com / admin123`), which remains relevant for template copy-paste risk.
+
+### Main Launch Risks
+
+- `app/(login)/actions.ts` still exposes sign-in and sign-up flows without visible credential-stuffing or signup-abuse controls in the inspected snapshot.
+- `app/api/stripe/checkout/route.ts` still looks able to bind a browser session to the user referenced by the Stripe checkout object rather than to the already authenticated browser session.
+- The local snapshot still has no automated tests or CI workflows, so auth and billing regressions remain easier to ship unnoticed.
+
+### False Positives
+
+- Before this run, `secret_signals` flagged `lib/db/schema.ts` because the enum member `UPDATE_PASSWORD = 'UPDATE_PASSWORD'` matched the generic password/secret regex even though it is just an activity-log label.
+- `hardcoded-url` remains noisy on instructional strings in `app/(dashboard)/terminal.tsx` and `lib/db/setup.ts`, but I did not change that heuristic in this run because the enum-label secret false positive had a cleaner, lower-risk fix.
+
+### Missed Or Weak Signals
+
+- No new blocker-class miss was confirmed in this follow-up. The strongest improvement opportunity was reducing scanner noise so the real auth and billing findings stay easier to triage.
+
+### Scanner Improvements Made
+
+- `secret_signals` now ignores enum/self-label assignments where an identifier is assigned the same quoted token, which removes bogus hits like `UPDATE_PASSWORD = 'UPDATE_PASSWORD'` without suppressing real secret literals on the same file.
